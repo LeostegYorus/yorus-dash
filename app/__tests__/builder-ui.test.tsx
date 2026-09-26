@@ -79,6 +79,76 @@ it("does not flag a complete spend widget for an unrelated missing optional metr
   expect(table.querySelector('.builder-warning')).not.toBeNull();
 });
 
+it("adds a lead column from the suggestion and updates the table without a second Save click", async () => {
+  const api = store({ version: 1, datasets: [], widgets: [{ ...metaWidget, visualization: 'table', dimension: 'campaignName' }] });
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/clients/')) return originalFetch(url, init);
+    const q = new URL(url, 'http://local.test').searchParams;
+    return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: q.get('start'), end: q.get('end') }, status: 'succeeded', warnings: [], metrics: [], rows: [{ campaignId: '1', campaignName: 'Campanha A', spend: 10, impressions: 100, clicks: 20, 'actions:lead': 7 }] });
+  }));
+  const user = userEvent.setup();render(<DashboardBuilder {...props} metaConnected />);
+  const card = await screen.findByRole('article', { name: 'Gasto' });
+  await within(card).findByRole('table');
+  const scrollWidth = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(900);
+  await user.click(card);await user.click(screen.getByRole('button', { name: 'Editar dados e formato' }));
+  await user.clear(screen.getByLabelText('Título da visualização'));await user.type(screen.getByLabelText('Título da visualização'), 'Título ainda não salvo');
+  await user.type(screen.getByLabelText('Buscar métricas Meta'), 'lead');
+  await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: /Adicionar .*\(actions:lead\)$/ }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ title: 'Gasto', measures: ['spend', 'actions:lead'] }));
+  expect(await within(card).findByRole('columnheader', { name: /Leads/ })).toBeInTheDocument();
+  expect(await within(card).findByText('7')).toBeInTheDocument();
+  expect(screen.getByText('Tabela atualizada. Colunas salvas.')).toBeInTheDocument();
+  expect(screen.getByLabelText('Título da visualização')).toHaveValue('Título ainda não salvo');
+  expect(within(card).getByRole('table').parentElement!.scrollLeft).toBe(900);
+  expect(screen.getByRole('button', { name: 'Ver tabela atualizada' })).toBeInTheDocument();
+  scrollWidth.mockRestore();
+});
+
+it("reveals the added column even if it was removed and re-added before data finished loading", async () => {
+  const api = store({ version: 1, datasets: [], widgets: [{ ...metaWidget, visualization: 'table', dimension: 'campaignName', measures: ['spend', 'actions:lead'] }] });
+  const originalFetch = globalThis.fetch;
+  let hold = false;
+  const pending: Array<() => void> = [];
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/clients/')) return originalFetch(url, init);
+    const q = new URL(url, 'http://local.test').searchParams;
+    const payload = { provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: q.get('start'), end: q.get('end') }, status: 'succeeded', warnings: [], metrics: [], rows: [{ campaignId: '1', campaignName: 'A', spend: 10, impressions: 100, clicks: 20, 'actions:lead': 7 }] };
+    if (hold && !q.has('catalog')) return new Promise(resolve => pending.push(() => resolve(reply(payload))));
+    return Promise.resolve(reply(payload));
+  }));
+  const user = userEvent.setup();render(<DashboardBuilder {...props} metaConnected />);
+  const card = await screen.findByRole('article', { name: 'Gasto' });await within(card).findByRole('table');
+  const scrollWidth = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(900);
+  await user.click(card);await user.click(screen.getByRole('button', { name: 'Editar dados e formato' }));
+  hold = true;
+  await user.click(screen.getByRole('button', { name: /Remover coluna.*Leads/ }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ measures: ['spend'] }));
+  await user.type(screen.getByLabelText('Buscar métricas Meta'), 'lead');
+  await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: /Adicionar .*\(actions:lead\)$/ }));
+  await waitFor(() => expect(pending).toHaveLength(2));
+  pending[1]();
+  const table = await within(card).findByRole('table');
+  expect(table.parentElement!.scrollLeft).toBe(900);
+  scrollWidth.mockRestore();
+});
+
+it.each([409, 503])("keeps the previous table selection if direct column saving fails with %s", async status => {
+  const original = { ...metaWidget, visualization: 'table', dimension: 'campaignName' };
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/clients/')) return init?.method === 'PUT' ? reply({}, status) : reply({ version: 1, datasets: [], widgets: [original] });
+    return reply({}, 503);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();render(<DashboardBuilder {...props} metaConnected />);
+  await user.click(await screen.findByRole('article', { name: 'Gasto' }));await user.click(screen.getByRole('button', { name: 'Editar dados e formato' }));
+  await user.type(screen.getByLabelText('Buscar métricas Meta'), 'lead');
+  await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: /Adicionar .*\(actions:lead\)$/ }));
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(status === 409 ? /Outra pessoa/ : /Não foi possível salvar/));
+  expect(screen.queryByText('Tabela atualizada. Colunas salvas.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Remover coluna.*Leads/ })).not.toBeInTheDocument();
+});
+
 it("uses the Meta summary for reach instead of summing overlapping audiences", async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.startsWith('/api/clients/')) return reply({ version: 1, datasets: [], widgets: [{ ...metaWidget, measure: 'reach', format: 'number' }] });
@@ -133,11 +203,11 @@ it("searches the Meta catalogue and saves several table columns including discov
   expect(screen.queryByLabelText('Formato')).not.toBeInTheDocument();
   expect(screen.getByText('Formato automático por coluna: moeda, número ou percentual conforme a métrica.')).toBeInTheDocument();
   await user.type(search, 'alcance');
-  await user.click(screen.getByRole('checkbox', { name: 'Alcance (reach)' }));
+  await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Adicionar Alcance (reach)' }));
   await user.clear(search);await user.type(search, 'ctr');
-  await user.click(screen.getByRole('checkbox', { name: 'CTR (ctr)' }));
+  await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Adicionar CTR (ctr)' }));
   await user.clear(search);await user.type(search, 'venda');
-  await user.click(await screen.findByRole('checkbox', { name: /conversions:offsite_conversion.fb_pixel_custom.venda/ }));
+  await user.click(await within(screen.getByRole('listbox')).findByRole('option', { name: /Adicionar .*conversions:offsite_conversion.fb_pixel_custom.venda/ }));
   await user.click(screen.getByRole('button', { name: 'Salvar visualização' }));
   await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ measure: 'spend', measures: ['spend', 'reach', 'ctr', 'conversions:offsite_conversion.fb_pixel_custom.venda'] }));
 });
