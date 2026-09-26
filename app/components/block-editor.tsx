@@ -54,13 +54,23 @@ function Editor({ block, tab, currency, busy, onCancel, onSave }: { block?: Bloc
   const [draft, setDraft] = useState(() => block ? draftOf(block) : blank());
   const [section, setSection] = useState<BlockTab>(block?.tab ?? tab);
   const [error, setError] = useState("");
-  const update = (fields: Partial<Draft>) => { setDraft(current => ({ ...current, ...fields })); setError(""); };
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const [confirmChange, setConfirmChange] = useState(false);
+  const update = (fields: Partial<Draft>) => { setDraft(current => ({ ...current, ...fields })); setError(""); setConfirmChange(false); };
+  const persist = (confirmed = false) => {
     const problem = validation(draft);
     if (problem) { setError(problem); return; }
+    if (block?.kind === "question" && draft.kind === "question" && !confirmed &&
+      block.options.some((option, index) => option.count !== null &&
+        (!draft.hasCounts || !draft.options[index] || draft.options[index].label.trim() !== option.label))) {
+      setConfirmChange(true);
+      return;
+    }
     const normalized = draft.kind === "investment" ? { ...draft, amount: draft.amount.replace(",", ".") } : draft;
     void onSave(makeBlock(normalized, section, block));
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    persist();
   };
   return <form className="block-editor" onSubmit={submit} noValidate aria-label={block ? `Editar ${block.title}` : "Novo bloco"}>
     <div className="editor-heading"><h3>{block ? "Editar bloco" : "Novo bloco"}</h3><button type="button" className="quiet-button" onClick={onCancel}>Cancelar</button></div>
@@ -83,6 +93,7 @@ function Editor({ block, tab, currency, busy, onCancel, onSave }: { block?: Bloc
       {draft.kind === "note" && <><label>Tipo de informação<select value={draft.evidenceType} onChange={e => update({ evidenceType: e.target.value as Draft["evidenceType"] })}><option value="hypothesis">Hipótese</option><option value="fact">Fato</option><option value="decision">Decisão</option></select></label><label>Fonte {draft.evidenceType === "fact" ? "do fato" : "(opcional)"}<input value={draft.sourceLabel} maxLength={120} onChange={e => update({ sourceLabel: e.target.value })} /></label><label className="field-wide">Conteúdo<textarea value={draft.body} maxLength={4000} onChange={e => update({ body: e.target.value })} required /></label></>}
     </div>
     {error && <p role="alert" className="editor-error">{error}</p>}
+    {confirmChange && <div className="block-confirm"><p>Alterar ou remover alternativas com contagens muda o significado das respostas já registradas. Confira os números e a fonte antes de confirmar.</p><button type="button" disabled={busy} onClick={() => persist(true)}>Confirmar alteração das alternativas</button></div>}
     <button className="block-primary" type="submit" disabled={busy}>{busy ? "Salvando…" : "Salvar bloco"}</button>
   </form>;
 }
@@ -96,7 +107,7 @@ function BlockCard({ block, meta, currency, onEdit, onRemove, onMove, first, las
     <div className="block-card-top"><div><span className="block-category">{block.kind === "investment" ? "INVESTIMENTO" : block.kind === "question" ? "PERFIL / FORMULÁRIO" : block.evidenceType === "fact" ? "FATO" : block.evidenceType === "decision" ? "DECISÃO" : "HIPÓTESE"}</span><h3>{block.title}</h3></div>{onEdit && <div className="block-actions"><button type="button" onClick={onEdit} disabled={busy}>Editar</button><button type="button" onClick={() => onMove?.(-1)} disabled={busy || first} aria-label={`Mover ${block.title} para cima`}>↑</button><button type="button" onClick={() => onMove?.(1)} disabled={busy || last} aria-label={`Mover ${block.title} para baixo`}>↓</button><button type="button" onClick={() => setConfirm(true)} disabled={busy}>Excluir</button></div>}</div>
     {block.kind === "note" && <p className="block-body">{block.body}</p>}
     {block.kind === "investment" && (block.source === "manual" ? <><strong className="block-value">{money(block.amountCents / 100)}</strong>{block.note && <p className="block-body">{block.note}</p>}</> : meta ? <><strong className="block-value">{money(meta.rows.reduce((sum, row) => sum + row.spend, 0))}</strong>{meta.status === "partial" && <p className="block-warning">Consulta parcial — o total pode estar incompleto.</p>}</> : <p className="block-unavailable">Investimento Meta indisponível neste recorte.</p>)}
-    {block.kind === "question" && <><p className="block-question">{block.question}</p>{total === null ? <p className="block-unavailable">Pergunta configurada · Sem respostas registradas</p> : total === 0 ? <p className="block-unavailable">0 respostas registradas</p> : <p className="block-total">{new Intl.NumberFormat("pt-BR").format(total)} respostas agregadas informadas</p>}<ul className="answer-list">{block.options.map((option, i) => <li key={i}><span>{option.label}</span><span>{option.count === null ? "não informado" : new Intl.NumberFormat("pt-BR").format(option.count)}{total !== null && total > 0 ? ` · ${new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 }).format((option.count ?? 0) / total)}` : ""}</span>{total !== null && total > 0 && <span className="answer-track" aria-hidden="true"><span data-testid="distribution-bar" className="answer-fill" style={{ width: `${(option.count ?? 0) / total * 100}%` }} /></span>}</li>)}</ul></>}
+    {block.kind === "question" && <><p className="block-question">{block.question}</p>{total === null ? <p className="block-unavailable">Pergunta configurada · Sem contagens informadas</p> : total === 0 ? <p className="block-unavailable">0 marcações informadas</p> : <><p className="block-total">{new Intl.NumberFormat("pt-BR").format(total)} marcações agregadas informadas</p><p className="editor-hint">Percentuais: participação das marcações, não percentual de pessoas ou leads únicos.</p></>}<ul className="answer-list">{block.options.map((option, i) => <li key={i}><span>{option.label}</span><span>{option.count === null ? "não informado" : new Intl.NumberFormat("pt-BR").format(option.count)}{total !== null && total > 0 ? ` · ${new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 }).format((option.count ?? 0) / total)}` : ""}</span>{total !== null && total > 0 && <span className="answer-track" aria-hidden="true"><span data-testid="distribution-bar" className="answer-fill" style={{ width: `${(option.count ?? 0) / total * 100}%` }} /></span>}</li>)}</ul></>}
     <div className="block-provenance">{block.kind === "investment" ? block.source === "manual" ? <><span>Informado manualmente · {block.sourceLabel}</span><span>Período: {period(block.periodStart, block.periodEnd)}</span></> : <><span>Fonte: Meta Ads · campanhas</span><span>Período: {meta ? period(meta.dateRange.start, meta.dateRange.end) : "filtro de mídia"}</span></> : block.kind === "question" ? <><span>{total === null ? "Sem contagens informadas" : "Informado manualmente · contagens agregadas"}{block.sourceLabel ? ` · Fonte: ${block.sourceLabel}` : ""}</span>{period(block.periodStart, block.periodEnd) && <span>Período: {period(block.periodStart, block.periodEnd)}</span>}</> : <span>{block.sourceLabel ? `Fonte: ${block.sourceLabel}` : "Fonte não informada"}</span>}</div>
     {confirm && <div className="block-confirm"><p>Excluir este bloco? Esta ação não pode ser desfeita.</p><button type="button" disabled={busy} onClick={onRemove}>Confirmar exclusão</button><button type="button" disabled={busy} onClick={() => setConfirm(false)}>Cancelar</button></div>}
   </article>;

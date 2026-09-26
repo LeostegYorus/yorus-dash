@@ -34,7 +34,7 @@ it("shows configured questions independently of a failed Meta request without in
   render(<Dashboard session={session} onLogout={() => {}} logoutError="" />);
   await userEvent.click(screen.getByRole("button", { name: "Perfil dos leads" }));
   expect(await screen.findByText("Quando pretende comprar?")).toBeInTheDocument();
-  expect(screen.getByText(/sem respostas registradas/i)).toBeInTheDocument();
+  expect(screen.getByText("Pergunta configurada · Sem contagens informadas")).toBeInTheDocument();
   expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Adicionar bloco" })).not.toBeInTheDocument();
 });
@@ -211,9 +211,31 @@ it("shows proportional distribution bars only for actual positive response total
   expect(within(unknown).queryByTestId("distribution-bar")).not.toBeInTheDocument();
   expect(within(unknown).queryByText(/%/)).not.toBeInTheDocument();
   expect(within(measured).getAllByTestId("distribution-bar")).toHaveLength(2);
-  expect(within(measured).getByText(/4 respostas agregadas informadas/)).toBeInTheDocument();
+  expect(within(measured).getByText(/4 marcações agregadas informadas/)).toBeInTheDocument();
+  expect(within(measured).getByText(/participação das marcações, não percentual de pessoas/i)).toBeInTheDocument();
   expect(within(measured).getByText(/2026-08-01 a 2026-08-31/)).toBeInTheDocument();
   expect(screen.getByText("Os filtros de mídia não alteram os dados informados manualmente.")).toBeInTheDocument();
+});
+
+it("requires explicit confirmation before replacing an alternative with recorded counts", async () => {
+  const admin = { ...session, user: { ...session.user, role: "admin" } };
+  const counted = { ...question, options: [{ label: "Agora", count: 3 }, { label: "Depois", count: 1 }], sourceLabel: "Formulário", periodStart: "2026-08-01", periodEnd: "2026-08-31" };
+  const requests = mockRequests(async (url, init) => {
+    if (url.startsWith("/api/dashboard")) return json({}, 503);
+    if (init?.method === "PUT") return json({ version: 2, blocks: JSON.parse(String(init.body)).blocks });
+    return json({ version: 1, blocks: [counted] });
+  });
+  render(<Dashboard session={admin} onLogout={() => {}} logoutError="" />);
+  await userEvent.click(screen.getByRole("button", { name: "Perfil dos leads" }));
+  const card = await screen.findByRole("article", { name: "Momento de compra" });
+  await userEvent.click(within(card).getByRole("button", { name: "Editar" }));
+  await userEvent.clear(screen.getByLabelText("Alternativa 1"));
+  await userEvent.type(screen.getByLabelText("Alternativa 1"), "Imediatamente");
+  await userEvent.click(screen.getByRole("button", { name: "Salvar bloco" }));
+  expect(requests.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  expect(screen.getByText(/alterar ou remover alternativas com contagens muda o significado/i)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Confirmar alteração das alternativas" }));
+  await waitFor(() => expect(requests.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
 });
 
 it("moves adjacent blocks within the selected tab while retaining the document version", async () => {
