@@ -1,12 +1,11 @@
-import { configuredAuth, errorResponse, jsonResponse, sessionCookie, verifyPassword } from '../../../lib/auth';
+import { configuredAuth, errorResponse, jsonResponse, sameOrigin, sessionCookie, verifyPassword } from '../../../lib/auth';
 import { ConfigurationError, publicClient } from '../../../lib/clients';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const origin = request.headers.get('origin');
-    if (origin && origin !== new URL(request.url).origin) return errorResponse(403);
+    if (!sameOrigin(request)) return errorResponse(403);
     const { users, clients, secret } = configuredAuth();
     if (!/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(request.headers.get('content-type') ?? '')) return errorResponse(400);
     let body: unknown;

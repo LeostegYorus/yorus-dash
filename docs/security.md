@@ -16,7 +16,7 @@ Blocos do cliente são persistidos em diretório privado (`DASH_DATA_DIR`) fora 
 2. Sessão própria do app (usuário/senha forte com scrypt, cookie HttpOnly, assinatura e expiração). O usuário vê apenas seus clientes.
 3. Para receber clientes externos, substituir ou complementar o acesso da borda por uma política que inclua identidades específicas e mantenha a verificação por cliente no app. Não compartilhar senha administrativa entre clientes.
 
-O Access atual do host `hermes.yorus.top` usa uma política privada “Sócios Yorus”, com login por código de e-mail. Isso serve como referência de arquitetura, **não é autorização automática para copiar essa política** ou publicar o novo host. Um proxy sem Access e apenas senha compartilhada não é implantação de produção aprovada.
+O Access atual do host `hermes.yorus.top` usa uma política privada “Sócios Yorus”, com login por código de e-mail. Isso serve como referência de arquitetura, **não é autorização automática para copiar essa política** ou publicar o novo host. Um proxy sem Access e apenas senha compartilhada não é implantação de produção aprovada. A checagem de `Origin` aceita `X-Forwarded-Proto: https` apenas para casar o mesmo host HTTPS com o listener Node HTTP; esse header precisa ser definido por um proxy confiável, e o listener deve permanecer privado/loopback.
 
 ## Integrações
 

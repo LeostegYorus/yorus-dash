@@ -192,6 +192,25 @@ describe('server auth routes', () => {
     expect((await POST(sameOriginRequest)).status).toBe(200);
   });
 
+  it('accepts browser HTTPS Origin behind a TLS-terminating proxy but not forged hosts or ambiguous forwarding', async () => {
+    const { POST } = await import('../../app/api/login/route');
+    const body = { email: 'a@example.test', password: 'test-only-password' };
+    const proxied = postLogin(body);
+    proxied.headers.set('origin', 'https://localhost');
+    proxied.headers.set('x-forwarded-proto', 'https');
+    expect((await POST(proxied)).status).toBe(200);
+    for (const [origin, proto] of [
+      ['https://attacker.example', 'https'],
+      ['https://localhost', 'https,http'],
+      ['https://localhost', 'http'],
+    ]) {
+      const request = postLogin(body);
+      request.headers.set('origin', origin);
+      request.headers.set('x-forwarded-proto', proto);
+      expect((await POST(request)).status).toBe(403);
+    }
+  });
+
   it('marks cookies Secure in production', async () => {
     const { POST } = await import('../../app/api/login/route');
     vi.stubEnv('NODE_ENV', 'production');

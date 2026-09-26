@@ -1,4 +1,4 @@
-import { authenticate, errorResponse, jsonResponse } from '../../../../../lib/auth';
+import { authenticate, errorResponse, jsonResponse, sameOrigin } from '../../../../../lib/auth';
 import { ConfigurationError } from '../../../../../lib/clients';
 import { BlockValidationError, parseBlockDocument } from '../../../../../lib/block-types';
 import { BlockConflictError, BlockStorageError, readBlockDocument, writeBlockDocument } from '../../../../../lib/block-store';
@@ -56,8 +56,7 @@ export async function PUT(request: Request, context: Context): Promise<Response>
   try {
     const access = await authorized(request, context, true);
     if (access instanceof Response) return access;
-    const origin = request.headers.get('origin');
-    if (origin !== null && origin !== new URL(request.url).origin) return errorResponse(403);
+    if (!sameOrigin(request)) return errorResponse(403);
     if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers.get('content-type') ?? '')) return errorResponse(400);
     const document = parseBlockDocument(await readLimitedJson(request));
     return jsonResponse(await writeBlockDocument(access.client, document));

@@ -100,4 +100,11 @@ describe('per-client blocks API', () => {
     expect((await GET(request('alpha', users[0]), context('../alpha'))).status).toBe(400);
     expect((await GET(request('alpha', users[0]), context('beta'))).status).toBe(400);
   });
+  it('accepts a same-host HTTPS browser write through a TLS proxy and rejects other hosts', async () => {
+    expect((await PUT(request('alpha', users[0], { version: 0, blocks: [] }, { origin: 'https://localhost', 'x-forwarded-proto': 'https' }), context('alpha'))).status).toBe(200);
+    expect((await PUT(request('alpha', users[0], { version: 1, blocks: [] }, { origin: 'https://evil.example', 'x-forwarded-proto': 'https' }), context('alpha'))).status).toBe(403);
+    expect((await PUT(request('alpha', users[0], { version: 1, blocks: [] }, { origin: 'https://localhost', 'x-forwarded-proto': 'https,http' }), context('alpha'))).status).toBe(403);
+    const saved = await GET(request('alpha', users[0]), context('alpha'));
+    expect((await saved.json() as { version: number }).version).toBe(1);
+  });
 });
