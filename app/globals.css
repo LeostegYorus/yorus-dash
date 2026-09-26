@@ -172,6 +172,11 @@ button:active {
   padding: 44px clamp(24px, 4.1vw, 72px) 36px;
   min-width: 0;
 }
+.main-content.builder-main {
+  width: 100%;
+  max-width: none;
+  padding: 28px clamp(16px, 2vw, 32px) 24px;
+}
 .topline {
   display: flex;
   align-items: flex-start;

@@ -10,6 +10,9 @@ A primeira configuração conhecida é eConfor (`act_2851473791833439`, BRL). Pa
 
 Blocos do cliente são persistidos em diretório privado (`DASH_DATA_DIR`) fora do repositório, separados por slug validado. Leitura requer membership; escrita exige `role=admin` e controle de versão para impedir sobrescrita silenciosa. A primeira versão aceita apenas perguntas/contagens **agregadas**, orçamento informado e notas, sem armazenar nomes, telefones ou linhas de leads. Fonte e período são obrigatórios para contagens e valores manuais. Esses totais não são atribuídos automaticamente a campanhas; cruzamento exige dados linha a linha e chave de origem conciliável.
 
+## Construtor e dados inseridos manualmente
+O construtor usa documentos independentes dos blocos legados. O mesmo `DASH_DATA_DIR` privado guarda datasets tipados e a composição por cliente; a rota exige autenticação, membership, papel de administrador para escrita, origem válida e revisão otimista. Não inserir nomes, telefones, e-mails ou respostas linha a linha de pessoas nos datasets manuais desta prévia: campos de texto livres podem armazenar dados pessoais, mesmo quando a interface os chama de categorias. Antes de dados reais, definir política de retenção, revisão de acesso e importação/consentimento apropriados. Fonte e período manuais são explícitos e não seguem automaticamente os filtros Meta. Não há junção entre datasets e campanhas, nem atribuição de resultados comerciais.
+
 ## Camadas de acesso planejadas
 
 1. Autenticação de borda apropriada à internet: Cloudflare Access no host `dash.yorus.top`, com política restrita e login por código no e-mail para os sócios Yorus. A aplicação Access deve ser criada e verificada ANTES de qualquer publicação. O DNS atual de `dash.yorus.top` está respondendo pelo wildcard antigo, não é prova de rota ativa.

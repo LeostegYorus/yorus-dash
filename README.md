@@ -4,10 +4,11 @@ Sistema independente de dashboards para clientes da Yorus. **Não é o site inst
 
 ## Primeiro recorte
 
-- Cliente-piloto: eConfor, conta Meta Ads expressamente autorizada.
-- Navegação: visão geral, campanhas, conjuntos, anúncios, perfil dos leads, custos e decisão, metodologia; seleção de cliente e período.
-- **Blocos por cliente:** administrador pode compor investimento (Meta automático ou valor manual), pergunta de formulário com alternativas/contagens e nota de leitura, reordenar, editar e excluir. Blocos são armazenados fora do repositório em `DASH_DATA_DIR` (pasta persistente e privada; uma instância Node). Outros usuários autorizados consultam sem editar.
-- Perguntas sem contagens exibem apenas a estrutura. Contagens manuais exigem fonte e período, não mudam com os filtros de mídia e não permitem atribuição por campanha. Investimento manual também mantém seu próprio período e não é somado automaticamente ao gasto Meta. Não há importação de respostas individuais nesta versão; ver `docs/briefs/modular-blocks.md`.
+- **Meu painel (construtor):** o administrador cria conjuntos manuais com campos tipados e linhas, escolhe medidas e dimensões, monta widgets de métrica, barras, tabela ou texto, ajusta agregação, formato numérico/moeda, largura e ordem no canvas e salva a composição por cliente. Leitores veem sem editar. Veja `docs/briefs/dashboard-builder.md` para limites e critérios.
+- **Fontes:** catálogo Meta Ads em leitura, com investimento, impressões, cliques e dimensões de campanha/conjunto/anúncio, somente para a conta autorizada no servidor. Se não estiver conectada, não há métricas inventadas. Datas Meta não alteram valores de conjuntos manuais; estes têm fonte e período próprios. Percentuais sem denominador validado não são oferecidos como formatação.
+- As abas analíticas anteriores (Visão geral, campanhas, conjuntos, anúncios, perfil, custos e metodologia) permanecem disponíveis, inclusive o editor legado de blocos. **O construtor é um primeiro recorte funcional, não equivalência completa com Data Studio ou Power BI.**
+- Cliente-piloto configurável: eConfor, conta Meta Ads expressamente autorizada. A prévia temporária usa somente clientes e dados fictícios.
+- **Blocos legados por cliente:** investimento Meta/manual, pergunta com alternativas/contagens e nota de leitura, armazenados separadamente em `DASH_DATA_DIR`. Perguntas sem contagens exibem apenas a estrutura; contagens manuais exigem fonte e período, não mudam com filtros de mídia e não permitem atribuição por campanha. Veja `docs/briefs/modular-blocks.md`.
 - Meta Ads Insights em leitura somente. `clicks` significa **todos os cliques**, não cliques no link. Gastos na moeda configurada para a conta.
 - GA4, respostas linha a linha, CRM, qualificação e vendas **não estão conectados**. Não inferir CPL, CAC, retorno ou qualidade de leads dessas métricas isoladas.
 - Um usuário só pode consultar clientes de sua lista no servidor. O browser nunca escolhe o ID da conta Meta como autoridade.

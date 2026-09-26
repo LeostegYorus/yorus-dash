@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import BlockWorkspace from "./block-editor";
+import DashboardBuilder from "./dashboard-builder";
 
 export type Client = {
   id: string;
@@ -17,7 +18,7 @@ export type Session = {
 };
 type Level = "campaign" | "adset" | "ad";
 type Tab =
-  "Visão geral" | "Campanhas" | "Conjuntos" | "Anúncios" | "Perfil dos leads" | "Custos e decisão" | "Metodologia";
+  "Meu painel" | "Visão geral" | "Campanhas" | "Conjuntos" | "Anúncios" | "Perfil dos leads" | "Custos e decisão" | "Metodologia";
 export type Insight = {
   campaignId?: string;
   campaignName?: string;
@@ -42,6 +43,7 @@ export type DashboardResult = {
   rows: Insight[];
 };
 const tabs: Tab[] = [
+  "Meu painel",
   "Visão geral",
   "Campanhas",
   "Conjuntos",
@@ -50,7 +52,7 @@ const tabs: Tab[] = [
   "Custos e decisão",
   "Metodologia",
 ];
-const levels: Record<Exclude<Tab, "Metodologia">, Level> = {
+const levels: Record<Exclude<Tab, "Metodologia" | "Meu painel">, Level> = {
   "Visão geral": "campaign",
   Campanhas: "campaign",
   Conjuntos: "adset",
@@ -195,7 +197,7 @@ export default function Dashboard({
   logoutError: string;
 }) {
   const [clientId, setClientId] = useState(session.clients[0]?.id ?? "");
-  const [tab, setTab] = useState<Tab>("Visão geral");
+  const [tab, setTab] = useState<Tab>("Meu painel");
   const [start, setStart] = useState(earlier);
   const [end, setEnd] = useState(yesterday);
   const [data, setData] = useState<DashboardResult | null>(null);
@@ -222,10 +224,10 @@ export default function Dashboard({
   const client = session.clients.find((item) => item.id === clientId);
   const blockTab = tab === "Visão geral" ? "overview" : tab === "Perfil dos leads" ? "profile" : tab === "Custos e decisão" ? "costs" : null;
   const blocksOnly = tab === "Perfil dos leads" || tab === "Custos e decisão";
-  const level = tab === "Metodologia" ? "campaign" : levels[tab];
+  const level = tab === "Metodologia" || tab === "Meu painel" ? "campaign" : levels[tab];
 
   useEffect(() => {
-    if (!clientId || tab === "Metodologia" || blocksOnly || !client?.metaConnected || !start || !end || end < start)
+    if (!clientId || tab === "Meu painel" || tab === "Metodologia" || blocksOnly || !client?.metaConnected || !start || !end || end < start)
       return;
     const controller = new AbortController();
     const params = new URLSearchParams({ client: clientId, start, end, level });
@@ -339,21 +341,21 @@ export default function Dashboard({
           <button onClick={onLogout}>Sair</button>
         </div>
       </aside>
-      <main className="main-content">
+      <main className={tab === "Meu painel" ? "main-content builder-main" : "main-content"}>
         <header className="topline">
           <div>
             <p className="eyebrow">YORUS / INTELIGÊNCIA DE MÍDIA</p>
             <h1>{tab}</h1>
             <p className="subtitle">
               {client?.name ?? "Nenhum cliente autorizado"}{" "}
-              <span className="separator">/</span> {blocksOnly ? "Blocos do cliente" : "Meta Ads"}
+              <span className="separator">/</span> {tab === "Meu painel" ? "Construtor de dashboards" : blocksOnly ? "Blocos do cliente" : "Meta Ads"}
             </p>
           </div>
-          {!blocksOnly && <div className="source-chip">
+          {!blocksOnly && tab !== "Meu painel" && <div className="source-chip">
             META ADS <span>FONTE DE MÍDIA</span>
           </div>}
         </header>
-        {(blocksOnly || client?.metaConnected) && <div className="toolbar">
+        {tab !== "Meu painel" && (blocksOnly || client?.metaConnected) && <div className="toolbar">
           <div className="date-fields">
             <label>
               De{" "}
@@ -393,12 +395,12 @@ export default function Dashboard({
             {logoutError}
           </div>
         )}
-        {!blocksOnly && end === today && (
+        {tab !== "Meu painel" && !blocksOnly && end === today && (
           <p className="live-day-note" role="note">
             Dia em andamento: os dados de hoje podem estar incompletos.
           </p>
         )}
-        {!blocksOnly && tab !== "Metodologia" &&
+        {tab !== "Meu painel" && !blocksOnly && tab !== "Metodologia" &&
           phase === "ready" &&
           data &&
           (data.status === "partial" || data.warnings.length > 0) && (
@@ -410,7 +412,9 @@ export default function Dashboard({
             </div>
           )}
         {tab === "Visão geral" && clientId && !client?.metaConnected && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={null} />}
-        {tab === "Metodologia" ? (
+        {tab === "Meu painel" && clientId ? (
+          <DashboardBuilder key={clientId} clientId={clientId} admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} metaConnected={Boolean(client?.metaConnected)} />
+        ) : tab === "Metodologia" ? (
           <section className="method">
             <h2>O que estes números mostram</h2>
             <p>
@@ -547,7 +551,7 @@ export default function Dashboard({
           </>
         )}
         {tab === "Visão geral" && clientId && client?.metaConnected && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={phase === "ready" && data?.client.id === clientId && data.scope.level === "campaign" ? data : null} />}
-        {tab !== "Metodologia" && !blocksOnly && phase === "ready" && data && data.rows.length > 0 && end >= start && (
+        {tab !== "Meu painel" && tab !== "Metodologia" && !blocksOnly && phase === "ready" && data && data.rows.length > 0 && end >= start && (
             <section className="detail-panel">
               <div className="section-heading">
                 <div>

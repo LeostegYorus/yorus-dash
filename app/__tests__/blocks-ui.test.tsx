@@ -21,7 +21,8 @@ const question = {
 };
 const json = (value: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => value });
 function mockRequests(handler: (url: string, init?: RequestInit) => Promise<unknown>) {
-  const mock = vi.fn((url: string, init?: RequestInit) => handler(url, init));
+  const mock = vi.fn((url: string, init?: RequestInit) =>
+    url.endsWith("/builder") ? Promise.resolve(json({ version: 0, datasets: [], widgets: [] })) : handler(url, init));
   vi.stubGlobal("fetch", mock);
   return mock;
 }
@@ -34,6 +35,7 @@ it("opens a manual-block preview without querying an unconfigured Meta source", 
     ? json({ version: 1, blocks: [demoNote] })
     : json({}, 503));
   render(<Dashboard session={admin} onLogout={() => {}} logoutError="" />);
+  await userEvent.click(screen.getByRole("button", { name: "Visão geral" }));
   expect(await screen.findByRole("article", { name: "Dados de demonstração" })).toBeInTheDocument();
   expect(screen.getByText(/meta ads não conectado/i)).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Meta Ads não conectado" }).closest("section")).toHaveClass("source-unavailable");
@@ -67,9 +69,9 @@ it("clears old blocks immediately and ignores a late response after switching cl
     return json({}, 503);
   });
   render(<Dashboard session={session} onLogout={() => {}} logoutError="" />);
+  await userEvent.click(screen.getByRole("button", { name: "Perfil dos leads" }));
   await waitFor(() => expect(resolveOld).toBeDefined());
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "Cliente" }), "beta");
-  await userEvent.click(screen.getByRole("button", { name: "Perfil dos leads" }));
   expect(await screen.findByText(/nenhum bloco neste espaço/i)).toBeInTheDocument();
   resolveOld(json({ version: 1, blocks: [question] }));
   expect(screen.queryByText("Quando pretende comprar?")).not.toBeInTheDocument();
@@ -177,11 +179,12 @@ it("does not re-fetch or hide configured blocks when Meta resolves later", async
     ? json({ version: 1, blocks: [{ ...question, tab: "overview" }] })
     : new Promise(resolve => { releaseMeta = resolve; }));
   render(<Dashboard session={session} onLogout={() => {}} logoutError="" />);
+  await userEvent.click(screen.getByRole("button", { name: "Visão geral" }));
   expect(await screen.findByText("Quando pretende comprar?")).toBeInTheDocument();
   releaseMeta(json({ client: session.clients[0], provider: "meta", scope: { account: "act_1", level: "campaign" }, dateRange: { start: "2026-09-01", end: "2026-09-10" }, collectedAt: "2026-09-11T10:00:00Z", status: "succeeded", warnings: [], rows: [{ campaignName: "Campanha Alpha", spend: 40, impressions: 2000, clicks: 20, dateStart: "2026-09-01", dateStop: "2026-09-10" }] }));
   expect(await screen.findByText("Campanha Alpha")).toBeInTheDocument();
   expect(screen.getByText("Quando pretende comprar?")).toBeInTheDocument();
-  expect(requests.mock.calls.filter(([url]) => url.startsWith("/api/clients/"))).toHaveLength(1);
+  expect(requests.mock.calls.filter(([url]) => url.endsWith("/blocks"))).toHaveLength(1);
 });
 
 it("rejects an ambiguous BRL amount rather than sending a misparsed investment", async () => {
@@ -304,6 +307,7 @@ it("keeps manual investment distinct from Meta totals and labels its own provena
     ? json({ version: 2, blocks: [investment] })
     : json({ client: session.clients[0], provider: "meta", scope: { account: "act_1", level: "campaign" }, dateRange: { start: "2026-09-01", end: "2026-09-10" }, collectedAt: "2026-09-11T10:00:00Z", status: "succeeded", warnings: [], rows: [{ campaignName: "Campanha Alpha", spend: 40, impressions: 2000, clicks: 20, dateStart: "2026-09-01", dateStop: "2026-09-10" }] }));
   render(<Dashboard session={session} onLogout={() => {}} logoutError="" />);
+  await userEvent.click(screen.getByRole("button", { name: "Visão geral" }));
   const card = await screen.findByRole("article", { name: "Orçamento informado" });
   expect(within(card).getByText(/R\$\s?1\.234,00/)).toBeInTheDocument();
   expect(within(card).getByText(/informado manualmente/i)).toBeInTheDocument();
