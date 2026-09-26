@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DashboardBuilder from "../components/dashboard-builder";
 import { parseBuilderDocument } from "../../lib/builder-types";
@@ -54,6 +54,103 @@ it("creates a manual dataset and data widget with versioned persistence", async 
   expect(api.document.widgets).toMatchObject([{ title: "Receita total", kind: "data", source: { kind: "manual" }, measure: "receita", format: "currency" }]);
   expect(api.document.datasets).toMatchObject([{ name: "Vendas", fields: [{ id: "canal", type: "text" }, { id: "receita", type: "number" }], rows: [{ canal: "Site", receita: 120.5 }] }]);
   expect(api.fetcher.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(2);
+});
+
+it("selects a chart on the canvas and persists its width and height from the inspector", async () => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  await user.click(card);
+  await user.selectOptions(screen.getByLabelText("Largura no canvas"), "8");
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ width: 8, position: { x: 0, y: 0, height: 5 } }));
+  await user.selectOptions(screen.getByLabelText("Altura no canvas"), "7");
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ width: 8, position: { x: 0, y: 0, height: 7 } }));
+  expect(card).toHaveAttribute("data-selected", "true");
+});
+
+it("drags a selected chart two columns and resizes it on the canvas, saving both coordinates", async () => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  render(<DashboardBuilder {...props} />);
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  const grid = card.closest(".builder-grid") as HTMLElement;
+  vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({ width: 1200, height: 1000, x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: 1000, toJSON: () => ({}) });
+  const grip = within(card).getByRole("button", { name: "Arrastar Conversão" });
+  fireEvent.pointerDown(grip, { pointerId: 1, clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(grip, { pointerId: 1, clientX: 300, clientY: 188 });
+  fireEvent.pointerUp(grip, { pointerId: 1, clientX: 300, clientY: 188 });
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ width: 6, position: { x: 2, y: 2, height: 5 } }));
+  const handle = within(card).getByRole("button", { name: "Redimensionar Conversão" });
+  fireEvent.pointerDown(handle, { pointerId: 2, clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(handle, { pointerId: 2, clientX: 300, clientY: 188 });
+  fireEvent.pointerUp(handle, { pointerId: 2, clientX: 300, clientY: 188 });
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ width: 8, position: { x: 2, y: 2, height: 7 } }));
+});
+
+it("does not write a document when a chart handle is pressed without moving", async () => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  render(<DashboardBuilder {...props} />);
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  const grid = card.closest(".builder-grid") as HTMLElement;
+  vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({ width: 1200, height: 1000, x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: 1000, toJSON: () => ({}) });
+  const grip = within(card).getByRole("button", { name: "Arrastar Conversão" });
+  fireEvent.pointerDown(grip, { pointerId: 4, clientX: 100, clientY: 100 });
+  fireEvent.pointerUp(grip, { pointerId: 4, clientX: 100, clientY: 100 });
+  expect(api.fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+});
+
+it("does not save a chart when a keyboard move hits the canvas edge", async () => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  render(<DashboardBuilder {...props} />);
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  fireEvent.keyDown(within(card).getByRole("button", { name: "Arrastar Conversão" }), { key: "ArrowLeft" });
+  expect(api.fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+});
+
+it("keeps a chart's placed geometry when editing its data title", async () => {
+  const placed = { ...manualWidget, width: 8, position: { x: 2, y: 2, height: 7 } };
+  const api = store({ version: 1, datasets: [dataset], widgets: [placed] });
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  await user.click(await screen.findByRole("article", { name: "Conversão" }));
+  await user.click(screen.getByRole("button", { name: "Editar dados e formato" }));
+  await user.clear(screen.getByLabelText("Título da visualização"));
+  await user.type(screen.getByLabelText("Título da visualização"), "Conversão revisada");
+  await user.click(screen.getByRole("button", { name: "Salvar visualização" }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ title: "Conversão revisada", width: 8, position: { x: 2, y: 2, height: 7 } }));
+});
+
+it("adds a connected Meta bar chart to an empty canvas from the chart palette", async () => {
+  const api = store();
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} metaConnected />);
+  await user.click(await screen.findByRole("button", { name: "Adicionar gráfico de barras" }));
+  await waitFor(() => expect(api.document.widgets).toHaveLength(1));
+  expect(api.document.widgets[0]).toMatchObject({ kind: "data", source: { kind: "meta", level: "campaign" }, visualization: "bar", dimension: "campaignName", measure: "spend", position: { x: 0, y: 0, height: 7 } });
+  const chart = await screen.findByRole("article", { name: "Gasto por campanha" });
+  expect(chart).toHaveAttribute("data-selected", "true");
+  expect(within(chart).getByRole("button", { name: "Redimensionar Gasto por campanha" })).toBeInTheDocument();
+});
+
+it("clamps a chart inside the canvas when its width is changed in the edit form", async () => {
+  const placed = { ...manualWidget, position: { x: 6, y: 0, height: 5 } };
+  const api = store({ version: 1, datasets: [dataset], widgets: [placed] });
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  await user.click(await screen.findByRole("article", { name: "Conversão" }));
+  await user.click(screen.getByRole("button", { name: "Editar dados e formato" }));
+  await user.selectOptions(screen.getByLabelText("Largura"), "8");
+  await user.click(screen.getByRole("button", { name: "Salvar visualização" }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ width: 8, position: { x: 4, y: 0, height: 5 } }));
+});
+
+it("does not let a viewer manipulate the canvas", async () => {
+  store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  render(<DashboardBuilder {...props} admin={false} />);
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  expect(within(card).queryByRole("button", { name: /Redimensionar Conversão/ })).not.toBeInTheDocument();
+  expect(within(card).queryByRole("button", { name: /Mover Conversão/ })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Largura no canvas")).not.toBeInTheDocument();
 });
 
 it("formats the average of manual numeric rows without a Meta date filter", async () => {
@@ -141,7 +238,8 @@ it("handles optimistic version conflicts without claiming the widget saved", asy
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   render(<DashboardBuilder {...props} />);
-  await user.click(await screen.findByRole("button", { name: "Editar Conversão" }));
+  await user.click(await screen.findByRole("article", { name: "Conversão" }));
+  await user.click(screen.getByRole("button", { name: "Editar dados e formato" }));
   await user.clear(screen.getByLabelText("Título da visualização"));
   await user.type(screen.getByLabelText("Título da visualização"), "Alteração local");
   await user.click(screen.getByRole("button", { name: "Salvar visualização" }));
@@ -195,15 +293,14 @@ it("requires text content before persisting a text widget", async () => {
   expect(api.document.widgets[0]).toMatchObject({ kind: "text", width: 12, body: "Resultado informado pela equipe." });
 });
 
-it("reorders widgets with accessible directional controls", async () => {
+it("moves a chart by keyboard and relocates an occupied tile", async () => {
   const note = { id: "8b956e8e-2fd7-407f-8378-d0fb98579447", kind: "text", title: "Contexto", width: 6, body: "Leitura do período." };
   const api = store({ version: 2, datasets: [dataset], widgets: [note, manualWidget] });
-  const user = userEvent.setup();
   render(<DashboardBuilder {...props} />);
-  await user.click(within(await screen.findByRole("article", { name: "Conversão" })).getByRole("button", { name: "Mover Conversão para esquerda" }));
-  await waitFor(() => expect(api.document.widgets).toMatchObject([{ title: "Conversão" }, { title: "Contexto" }]));
-  expect(screen.getByRole("button", { name: "Mover Conversão para esquerda" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Mover Conversão para direita" })).toBeEnabled();
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  fireEvent.keyDown(within(card).getByRole("button", { name: "Arrastar Conversão" }), { key: "ArrowLeft" });
+  await waitFor(() => expect(api.document.widgets[1]).toMatchObject({ position: { x: 5, y: 0, height: 5 } }));
+  expect(api.document.widgets[0]).toMatchObject({ position: { x: 0, y: 5, height: 5 } });
 });
 
 it("does not present an explicitly null manual numeric cell as a measured zero", async () => {
@@ -236,7 +333,8 @@ it("does not offer percent for raw Meta measures", async () => {
   store({ version: 1, datasets: [dataset], widgets: [metaWidget] });
   const user = userEvent.setup();
   render(<DashboardBuilder {...props} metaConnected />);
-  await user.click(await screen.findByRole("button", { name: "Editar Gasto" }));
+  await user.click(await screen.findByRole("article", { name: "Gasto" }));
+  await user.click(screen.getByRole("button", { name: "Editar dados e formato" }));
   expect(within(screen.getByLabelText("Formato")).queryByRole("option", { name: /Percentual/ })).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("Fonte"), "manual");
   expect(within(screen.getByLabelText("Formato")).queryByRole("option", { name: /Percentual/ })).not.toBeInTheDocument();

@@ -3,7 +3,8 @@ export type ManualDataset = {
   fields: Array<{ id: string; label: string; type: 'text' | 'number' }>;
   rows: Array<Record<string, string | number | null>>;
 };
-type WidgetBase = { id: string; title: string; width: 3 | 6 | 9 | 12; note?: string };
+export const BUILDER_MAX_ROW = 1199;
+type WidgetBase = { id: string; title: string; width: number; note?: string; position?: { x: number; y: number; height: number } };
 export type BuilderWidget = WidgetBase & (
   { kind: 'text'; body: string } |
   { kind: 'data'; source: { kind: 'manual'; datasetId: string } | { kind: 'meta'; level: 'campaign' | 'adset' | 'ad' }; visualization: 'metric' | 'bar' | 'table'; dimension?: string; measure: string; aggregation: 'sum' | 'avg' | 'count'; format: 'number' | 'currency' | 'percent' }
@@ -55,14 +56,23 @@ function dataset(value: unknown): ManualDataset {
 }
 function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWidget {
   if (!object(value)) throw new BuilderValidationError();
-  if (!uuid(value.id) || ![3, 6, 9, 12].includes(value.width as number)) invalid();
+  if (!uuid(value.id) || !Number.isInteger(value.width) || (value.width as number) < 1 || (value.width as number) > 12) invalid();
   text(value.title, 120);
   if (value.note !== undefined) text(value.note, 2000, false, true);
+  if (Object.hasOwn(value, 'position')) {
+    const position = value.position;
+    if (!object(position)) throw new BuilderValidationError();
+    keys(position, ['x', 'y', 'height']);
+    if (!Number.isInteger(position.x) || (position.x as number) < 0 || (position.x as number) > 11 ||
+        !Number.isInteger(position.y) || (position.y as number) < 0 || (position.y as number) > BUILDER_MAX_ROW ||
+        !Number.isInteger(position.height) || (position.height as number) < 2 || (position.height as number) > 24 ||
+        (position.x as number) + (value.width as number) > 12) invalid();
+  }
   if (value.kind === 'text') {
-    keys(value, ['id', 'kind', 'title', 'width', 'body'], ['note']);
+    keys(value, ['id', 'kind', 'title', 'width', 'body'], ['note', 'position']);
     text(value.body, 4000, true, true);
   } else if (value.kind === 'data') {
-    keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note']);
+    keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note', 'position']);
     if (!object(value.source) || !['metric', 'bar', 'table'].includes(value.visualization as string) || !['sum', 'avg', 'count'].includes(value.aggregation as string) || !['number', 'currency', 'percent'].includes(value.format as string)) invalid();
     // No source in this schema declares a 0..1 proportion; percent would mislabel raw totals.
     if (value.format === 'percent') invalid();
@@ -92,6 +102,16 @@ export function parseBuilderDocument(value: unknown): BuilderDocument {
   if (new Set(datasets.map(item => item.id)).size !== datasets.length) invalid();
   const widgets = value.widgets.map(item => widget(item, new Map(datasets.map(dataset => [dataset.id, dataset]))));
   if (new Set(widgets.map(item => item.id)).size !== widgets.length) invalid();
+  for (let i = 0; i < widgets.length; i++) {
+    const a = widgets[i];
+    if (!a.position) continue;
+    for (let j = i + 1; j < widgets.length; j++) {
+      const b = widgets[j];
+      if (!b.position) continue;
+      if (a.position.x < b.position.x + b.width && b.position.x < a.position.x + a.width &&
+          a.position.y < b.position.y + b.position.height && b.position.y < a.position.y + a.position.height) invalid();
+    }
+  }
   if (Buffer.byteLength(JSON.stringify(value)) > 65536) invalid();
   return { version: value.version as number, datasets, widgets };
 }

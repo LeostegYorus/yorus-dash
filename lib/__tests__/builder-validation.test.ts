@@ -12,6 +12,52 @@ describe('builder document parser', () => {
   it('accepts a real manual dataset and chart without changing its contract', () => {
     expect(parseBuilderDocument(document())).toEqual(document());
   });
+  it('retains a freely sized widget and its explicit canvas rectangle', () => {
+    const placed = { ...widget, width: 5, position: { x: 7, y: 99, height: 24 } };
+    expect(parseBuilderDocument(document([dataset], [placed])).widgets[0]).toEqual(placed);
+  });
+  it('accepts a positioned chart beyond the first hundred rows for migrated legacy panels', () => {
+   const placed = { ...widget, position: { x: 0, y: 245, height: 5 } };
+   expect(parseBuilderDocument(document([dataset], [placed])).widgets[0]).toMatchObject({ position: placed.position });
+ });
+ it('rejects overlapping explicitly placed rectangles in one document', () => {
+    const first = { ...widget, position: { x: 2, y: 3, height: 4 } };
+    const second = { ...widget, id: crypto.randomUUID(), position: { x: 6, y: 6, height: 2 } };
+    expect(() => parseBuilderDocument(document([dataset], [first, second]))).toThrow();
+  });
+  it('accepts every integer width from 1 to 12 and retains legacy unplaced widgets', () => {
+    for (let width = 1; width <= 12; width++) {
+      const candidate = { ...widget, width };
+      expect(parseBuilderDocument(document([dataset], [candidate])).widgets[0]).toEqual(candidate);
+    }
+    const legacy = { id: crypto.randomUUID(), kind: 'text', title: 'Legacy', width: 3, body: 'Still valid' };
+    const placed = { ...widget, width: 1, position: { x: 11, y: 0, height: 2 } };
+    expect(parseBuilderDocument(document([dataset], [legacy, placed])).widgets).toEqual([legacy, placed]);
+  });
+  it('rejects invalid widths, malformed rectangles and account overrides', () => {
+    for (const width of [0, 13, -1, 5.5, NaN, Infinity, '5', null]) {
+      expect(() => parseBuilderDocument(document([dataset], [{ ...widget, width }]))).toThrow();
+    }
+    const position = { x: 6, y: 0, height: 2 };
+    for (const badPosition of [
+      undefined, null, [], '0,0', {}, { x: 6, y: 0 }, { ...position, accountId: 'act_1' },
+      ...[-1, 7, 12, 0.5, NaN, Infinity, '6'].map(x => ({ ...position, x })),
+      ...[-1, 1200, 0.5, NaN, Infinity, '0'].map(y => ({ ...position, y })),
+      ...[1, 25, 2.5, NaN, Infinity, '2'].map(height => ({ ...position, height })),
+    ]) {
+      expect(() => parseBuilderDocument(document([dataset], [{ ...widget, position: badPosition }]))).toThrow();
+    }
+    expect(() => parseBuilderDocument(document([dataset], [{ ...widget, position, accountId: 'act_1' }]))).toThrow();
+  });
+  it('allows rectangles to touch edges and only checks overlap between explicit placements', () => {
+    const first = { id: crypto.randomUUID(), kind: 'text', title: 'Top left', width: 6, body: 'A', position: { x: 0, y: 0, height: 2 } };
+    const right = { ...widget, position: { x: 6, y: 0, height: 2 } };
+    const below = { ...widget, id: crypto.randomUUID(), width: 12, position: { x: 0, y: 2, height: 2 } };
+    const legacy = { ...widget, id: crypto.randomUUID() };
+    expect(parseBuilderDocument(document([dataset], [first, right, below, legacy])).widgets).toEqual([first, right, below, legacy]);
+    expect(() => parseBuilderDocument(document([dataset], [first, { ...right, position: { x: 5, y: 0, height: 2 } }]))).toThrow();
+    expect(() => parseBuilderDocument(document([dataset], [first, { ...below, position: { x: 0, y: 1, height: 2 } }]))).toThrow();
+  });
   it('rejects an oversized document, including multibyte input', () => {
     expect(() => parseBuilderDocument(document([], [{ id: widgetId, kind: 'text', title: 'Note', width: 12, body: 'á'.repeat(33000) }]))).toThrow();
   });
@@ -69,6 +115,6 @@ describe('builder document parser', () => {
   it('keeps text widgets plain and bounded and forbids control chars in labels', () => {
     const plain = { id: widgetId, kind: 'text', title: 'Finding', width: 12, body: 'One\nTwo', note: 'Evidence' };
     expect(parseBuilderDocument(document([], [plain])).widgets[0]).toEqual(plain);
-    for (const changed of [{ body: '<script />' }, { title: 'X\u0000Y' }, { width: 5 }, { body: 'x'.repeat(4001) }, { measure: 'spend' }]) expect(() => parseBuilderDocument(document([], [{ ...plain, ...changed }]))).toThrow();
+    for (const changed of [{ body: '<script />' }, { title: 'X\u0000Y' }, { width: 13 }, { body: 'x'.repeat(4001) }, { measure: 'spend' }]) expect(() => parseBuilderDocument(document([], [{ ...plain, ...changed }]))).toThrow();
   });
 });
