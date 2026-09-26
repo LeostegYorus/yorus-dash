@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { parseBuilderDocument } from '../builder-types';
+import { BASE_META_METRICS } from '../meta-metrics';
 
 const datasetId = '123e4567-e89b-42d3-a456-426614174000';
 const widgetId = '123e4567-e89b-42d3-a456-426614174001';
@@ -9,6 +10,66 @@ const widget = { id: widgetId, kind: 'data', title: 'By region', width: 6, sourc
 const document = (datasets: unknown[] = [dataset], widgets: unknown[] = [widget]) => ({ version: 0, datasets, widgets });
 
 describe('builder document parser', () => {
+  it('rejects nonadditive Meta shares and ambiguous aggregation of new metrics', () => {
+    const meta = { ...widget, source: { kind: 'meta', level: 'campaign' }, dimension: 'campaignName' };
+    for (const measure of ['reach', 'ctr', 'cpc', 'frequency', 'purchase_roas:omni_purchase']) {
+      for (const visualization of ['pie', 'donut']) expect(() => parseBuilderDocument(document([], [{ ...meta, measure, visualization }]))).toThrow();
+      for (const aggregation of ['avg', 'count']) expect(() => parseBuilderDocument(document([], [{ ...meta, measure, aggregation }]))).toThrow();
+    }
+    for (const aggregation of ['avg', 'count']) {
+      expect(() => parseBuilderDocument(document([], [{ ...meta, measure: 'spend', aggregation }]))).not.toThrow();
+      expect(() => parseBuilderDocument(document([], [{ ...meta, measure: 'spend', visualization: 'table', measures: ['spend', 'reach'], aggregation }]))).toThrow();
+    }
+  });
+  it('accepts every registered Meta measure and safe dynamic subtype without changing the version', () => {
+    const metrics = [...BASE_META_METRICS, { id: 'conversions:offsite_conversion.custom.123', format: 'number' }];
+    for (const metric of metrics) {
+      const meta = { ...widget, source: { kind: 'meta', level: 'campaign' }, measure: metric.id, format: metric.format, dimension: 'campaignName' };
+      const input = document([], [meta]);
+      expect(parseBuilderDocument(input)).toEqual(input);
+    }
+  });
+  it('retains ordered Meta table measures from one through twenty, with the first equal to measure', () => {
+    for (const count of [1, 2, 10, 11, 20]) {
+      const measures = ['spend', ...Array.from({ length: count - 1 }, (_, i) => `actions:custom.${i}`)];
+      const meta = { ...widget, visualization: 'table', source: { kind: 'meta', level: 'campaign' }, dimension: 'campaignName', measure: 'spend', measures };
+      expect(parseBuilderDocument(document([], [meta])).widgets[0]).toEqual(meta);
+    }
+  });
+  it('rejects malformed, duplicate, excessive, mismatched or unapproved table measure lists', () => {
+    const meta = { ...widget, visualization: 'table', source: { kind: 'meta', level: 'campaign' }, dimension: 'campaignName', measure: 'spend' };
+    for (const measures of [undefined, null, 'spend', {}, [], ['reach'], ['spend', 'spend'],
+      ['spend', 'account_id'], ['spend', 'unknown'], ['spend', 1], ['spend', null],
+      ['spend', 'actions:__proto__'], ['spend', 'actions:x,account_id'],
+      ['spend', ...Array.from({ length: 20 }, (_, i) => `actions:custom.${i}`)],
+      Object.assign(new Array(2), { 0: 'spend' }),
+    ]) {
+      expect(() => parseBuilderDocument(document([], [{ ...meta, measures }]))).toThrow('Invalid builder document');
+    }
+  });
+  it('allows measures only on Meta tables, never manual data, other visuals or text', () => {
+    for (const visualization of ['metric', 'bar', 'column', 'line', 'area', 'pie', 'donut']) {
+      const meta = { ...widget, visualization, source: { kind: 'meta', level: 'campaign' }, dimension: 'campaignName', measure: 'spend', measures: ['spend'] };
+      expect(() => parseBuilderDocument(document([], [meta]))).toThrow('Invalid builder document');
+    }
+    expect(() => parseBuilderDocument(document([dataset], [{ ...widget, visualization: 'table', measures: ['revenue'] }]))).toThrow();
+    expect(() => parseBuilderDocument(document([], [{ id: widgetId, kind: 'text', title: 'Text', body: 'Text', width: 6, measures: ['spend'] }]))).toThrow();
+  });
+  it('allows percent only for a declared Meta percentage metric, independent of additional columns', () => {
+    const meta = { ...widget, visualization: 'table', source: { kind: 'meta', level: 'campaign' }, dimension: 'campaignName', measure: 'ctr', format: 'percent', measures: ['ctr', 'spend', 'reach'] };
+    expect(parseBuilderDocument(document([], [meta])).widgets[0]).toEqual(meta);
+    for (const measure of ['reach', 'frequency', 'purchase_roas:omni_purchase', 'actions:lead']) {
+      expect(() => parseBuilderDocument(document([], [{ ...meta, measure, measures: [measure, 'ctr'] }]))).toThrow();
+    }
+  });
+  it('preserves source binding, unknown-key, position and width protections for multi-measure tables', () => {
+    const meta = { ...widget, visualization: 'table', source: { kind: 'meta', level: 'campaign' }, dimension: 'campaignName', measure: 'spend', measures: ['spend', 'reach'] };
+    for (const changes of [{ source: { ...meta.source, accountId: 'act_1' } },
+      { accountId: 'act_1' }, { fields: ['spend'] }, { accessToken: 'not-a-token' },
+      { source: { ...meta.source, level: 'constructor' } }, { dimension: 'adName' },
+      { width: 13 }, { position: { x: 7, y: 0, height: 2 } },
+    ]) expect(() => parseBuilderDocument(document([], [{ ...meta, ...changes }]))).toThrow();
+  });
   describe.each(['bar', 'column', 'line', 'area', 'pie', 'donut', 'table'])('%s visualization', visualization => {
     it('accepts manual data including null and negative cells without rewriting the document', () => {
       const selected = { ...dataset, rows: [{ region: null, revenue: null }, { region: 'Refunds', revenue: -42.5 }] };

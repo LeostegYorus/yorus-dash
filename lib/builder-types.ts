@@ -1,3 +1,5 @@
+import { getMetaMetric } from './meta-metrics';
+
 export type ManualDataset = {
   id: string; name: string; sourceLabel: string; periodStart: string; periodEnd: string;
   fields: Array<{ id: string; label: string; type: 'text' | 'number' }>;
@@ -8,7 +10,7 @@ export type BuilderVisualization = 'metric' | 'bar' | 'column' | 'line' | 'area'
 type WidgetBase = { id: string; title: string; width: number; note?: string; position?: { x: number; y: number; height: number } };
 export type BuilderWidget = WidgetBase & (
   { kind: 'text'; body: string } |
-  { kind: 'data'; source: { kind: 'manual'; datasetId: string } | { kind: 'meta'; level: 'campaign' | 'adset' | 'ad' }; visualization: BuilderVisualization; dimension?: string; measure: string; aggregation: 'sum' | 'avg' | 'count'; format: 'number' | 'currency' | 'percent' }
+  { kind: 'data'; source: { kind: 'manual'; datasetId: string } | { kind: 'meta'; level: 'campaign' | 'adset' | 'ad' }; visualization: BuilderVisualization; dimension?: string; measure: string; measures?: string[]; aggregation: 'sum' | 'avg' | 'count'; format: 'number' | 'currency' | 'percent' }
 );
 export type BuilderDocument = { version: number; datasets: ManualDataset[]; widgets: BuilderWidget[] };
 export class BuilderValidationError extends Error { name = 'BuilderValidationError'; constructor() { super('Invalid builder document'); } }
@@ -73,15 +75,16 @@ function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWi
     keys(value, ['id', 'kind', 'title', 'width', 'body'], ['note', 'position']);
     text(value.body, 4000, true, true);
   } else if (value.kind === 'data') {
-    keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note', 'position']);
+    keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note', 'position', 'measures']);
     if (!object(value.source) || !['metric', 'bar', 'column', 'line', 'area', 'pie', 'donut', 'table'].includes(value.visualization as string) || !['sum', 'avg', 'count'].includes(value.aggregation as string) || !['number', 'currency', 'percent'].includes(value.format as string)) invalid();
-    // No source in this schema declares a 0..1 proportion; percent would mislabel raw totals.
-    if (value.format === 'percent') invalid();
+
     if (value.dimension !== undefined && (typeof value.dimension !== 'string' || !value.dimension)) invalid();
     if (value.visualization !== 'metric' && value.dimension === undefined) invalid();
     const source = value.source as Record<string, unknown>;
     if (source.kind === 'manual') {
       keys(source, ['kind', 'datasetId']);
+      // Manual fields have no proportion metadata or multi-measure table contract.
+      if (value.format === 'percent' || Object.hasOwn(value, 'measures')) invalid();
       const selected = datasets.get(source.datasetId as string);
       if (!selected) throw new BuilderValidationError();
       const measure = selected.fields.find(field => field.id === value.measure);
@@ -90,7 +93,19 @@ function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWi
     } else if (source.kind === 'meta') {
       keys(source, ['kind', 'level']);
       const dimensions: Record<string, string> = { campaign: 'campaignName', adset: 'adsetName', ad: 'adName' };
-      if (typeof source.level !== 'string' || !Object.hasOwn(dimensions, source.level) || !['spend', 'impressions', 'clicks'].includes(value.measure as string) || (value.dimension !== undefined && value.dimension !== dimensions[source.level])) invalid();
+      const metric = typeof value.measure === 'string' ? getMetaMetric(value.measure) : undefined;
+      if (typeof source.level !== 'string' || !Object.hasOwn(dimensions, source.level) || !metric || (value.dimension !== undefined && value.dimension !== dimensions[source.level])) invalid();
+      if (value.format === 'percent' && metric?.format !== 'percent') invalid();
+      if (['pie', 'donut'].includes(value.visualization as string) && !metric?.additive) invalid();
+      if (value.aggregation !== 'sum' && (!['spend', 'impressions', 'clicks'].includes(value.measure as string) || Object.hasOwn(value, 'measures'))) invalid();
+      if (Object.hasOwn(value, 'measures')) {
+        const measures = value.measures;
+        if (value.visualization !== 'table' || !Array.isArray(measures) || measures.length < 1 || measures.length > 20 ||
+            measures[0] !== value.measure || new Set(measures).size !== measures.length) throw new BuilderValidationError();
+        for (const measure of measures) {
+          if (typeof measure !== 'string' || !getMetaMetric(measure)) invalid();
+        }
+      }
     } else invalid();
   } else invalid();
   return value as BuilderWidget;
