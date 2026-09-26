@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import BlockWorkspace from "./block-editor";
 
 export type Client = {
   id: string;
@@ -16,7 +17,7 @@ export type Session = {
 };
 type Level = "campaign" | "adset" | "ad";
 type Tab =
-  "Visão geral" | "Campanhas" | "Conjuntos" | "Anúncios" | "Metodologia";
+  "Visão geral" | "Campanhas" | "Conjuntos" | "Anúncios" | "Perfil dos leads" | "Custos e decisão" | "Metodologia";
 export type Insight = {
   campaignId?: string;
   campaignName?: string;
@@ -45,6 +46,8 @@ const tabs: Tab[] = [
   "Campanhas",
   "Conjuntos",
   "Anúncios",
+  "Perfil dos leads",
+  "Custos e decisão",
   "Metodologia",
 ];
 const levels: Record<Exclude<Tab, "Metodologia">, Level> = {
@@ -52,6 +55,8 @@ const levels: Record<Exclude<Tab, "Metodologia">, Level> = {
   Campanhas: "campaign",
   Conjuntos: "adset",
   Anúncios: "ad",
+  "Perfil dos leads": "campaign",
+  "Custos e decisão": "campaign",
 };
 const today = new Date().toISOString().slice(0, 10);
 const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
@@ -215,10 +220,12 @@ export default function Dashboard({
     }
   }
   const client = session.clients.find((item) => item.id === clientId);
+  const blockTab = tab === "Visão geral" ? "overview" : tab === "Perfil dos leads" ? "profile" : tab === "Custos e decisão" ? "costs" : null;
+  const blocksOnly = tab === "Perfil dos leads" || tab === "Custos e decisão";
   const level = tab === "Metodologia" ? "campaign" : levels[tab];
 
   useEffect(() => {
-    if (!clientId || tab === "Metodologia" || !start || !end || end < start)
+    if (!clientId || tab === "Metodologia" || blocksOnly || !start || !end || end < start)
       return;
     const controller = new AbortController();
     const params = new URLSearchParams({ client: clientId, start, end, level });
@@ -260,7 +267,7 @@ export default function Dashboard({
         }
       });
     return () => controller.abort();
-  }, [clientId, start, end, level, tab, retry]);
+  }, [clientId, start, end, level, tab, blocksOnly, retry]);
 
   function changeClient(id: string) {
     setData(null);
@@ -339,14 +346,14 @@ export default function Dashboard({
             <h1>{tab}</h1>
             <p className="subtitle">
               {client?.name ?? "Nenhum cliente autorizado"}{" "}
-              <span className="separator">/</span> Meta Ads
+              <span className="separator">/</span> {blocksOnly ? "Blocos do cliente" : "Meta Ads"}
             </p>
           </div>
-          <div className="source-chip">
+          {!blocksOnly && <div className="source-chip">
             META ADS <span>FONTE DE MÍDIA</span>
-          </div>
+          </div>}
         </header>
-        <div className="toolbar">
+        {(!blocksOnly || tab === "Custos e decisão" || tab === "Perfil dos leads") && <div className="toolbar">
           <div className="date-fields">
             <label>
               De{" "}
@@ -371,27 +378,27 @@ export default function Dashboard({
             </label>
           </div>
           <span className="scope-label">
-            Recorte:{" "}
+            {blocksOnly ? "Datas aplicam-se apenas aos blocos Meta, quando houver" : <>Recorte:{" "}
             {tab === "Metodologia"
               ? "metodologia"
               : level === "ad"
                 ? "anúncios"
                 : level === "adset"
                   ? "conjuntos"
-                  : "campanhas"}
+                  : "campanhas"}</>}
           </span>
-        </div>
+        </div>}
         {logoutError && (
           <div role="alert" className="notice">
             {logoutError}
           </div>
         )}
-        {end === today && (
+        {!blocksOnly && end === today && (
           <p className="live-day-note" role="note">
             Dia em andamento: os dados de hoje podem estar incompletos.
           </p>
         )}
-        {tab !== "Metodologia" &&
+        {!blocksOnly && tab !== "Metodologia" &&
           phase === "ready" &&
           data &&
           (data.status === "partial" || data.warnings.length > 0) && (
@@ -433,6 +440,10 @@ export default function Dashboard({
                   equivalentes a cliques da Meta.
                 </p>
               </article>
+              <article>
+                <h3>Blocos configuráveis</h3>
+                <p>Perguntas sem respostas são apenas uma estrutura. Contagens manuais têm fonte e período próprios; não são conciliadas com campanhas Meta nem comprovam atribuição.</p>
+              </article>
             </div>
           </section>
         ) : !clientId ? (
@@ -440,6 +451,8 @@ export default function Dashboard({
             <h2>Nenhum cliente disponível</h2>
             <p>Solicite acesso a um cliente para consultar dados de mídia.</p>
           </section>
+        ) : blocksOnly ? (
+          <BlockWorkspace key={`${clientId}-${blockTab}`} clientId={clientId} tab={blockTab!} admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={null} metaStart={start} metaEnd={end} />
         ) : end < start ? (
           <p role="alert">
             A data final deve ser igual ou posterior à data inicial.
@@ -525,6 +538,10 @@ export default function Dashboard({
                 <small>Custo por mil impressões</small>
               </article>
             </section>
+          </>
+        )}
+        {tab === "Visão geral" && clientId && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={phase === "ready" && data?.client.id === clientId && data.scope.level === "campaign" ? data : null} />}
+        {tab !== "Metodologia" && !blocksOnly && phase === "ready" && data && data.rows.length > 0 && end >= start && (
             <section className="detail-panel">
               <div className="section-heading">
                 <div>
@@ -537,31 +554,16 @@ export default function Dashboard({
                         ? "conjunto"
                         : "campanha"}
                   </h2>
-                  <p>
-                    Valores exclusivamente do período e cliente selecionados.
-                  </p>
+                  <p>Valores exclusivamente do período e cliente selecionados.</p>
                 </div>
-                <button
-                  className="export-button"
-                  onClick={() => exportCsv(data, sorted)}
-                >
-                  Exportar CSV
-                </button>
+                <button className="export-button" onClick={() => exportCsv(data, sorted)}>Exportar CSV</button>
               </div>
-              <DataTable
-                key={`${clientId}-${level}-${start}-${end}`}
-                data={data}
-                sorted={sorted}
-                sort={sort}
-                descending={descending}
-                onSort={changeSort}
-              />
+              <DataTable key={`${clientId}-${level}-${start}-${end}`} data={data} sorted={sorted} sort={sort} descending={descending} onSort={changeSort} />
             </section>
-          </>
         )}
         <footer className="footer-note">
           <span>Meta Ads: mídia, não resultado comercial.</span>
-          <span>GA4 pendente · Leads e vendas não disponíveis</span>
+          <span>GA4 pendente · Blocos manuais não são conciliados com a Meta</span>
         </footer>
       </main>
     </div>

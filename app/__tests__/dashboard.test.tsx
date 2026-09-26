@@ -70,6 +70,7 @@ function setup(impl: (url: string, init?: RequestInit) => Promise<unknown>) {
   calls = [];
   fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith("/api/clients/") && url.endsWith("/blocks")) return json({ version: 0, blocks: [] });
     calls.push(url);
     return impl(url, init);
   });
@@ -166,7 +167,7 @@ describe("dashboard UI", () => {
       });
     });
     render(<Page />);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(calls.filter((url) => url.startsWith("/api/dashboard"))).toHaveLength(1));
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Cliente" }),
       "beta",
@@ -199,7 +200,7 @@ describe("dashboard UI", () => {
       });
     });
     render(<Page />);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(calls.filter((url) => url.startsWith("/api/dashboard"))).toHaveLength(1));
     await userEvent.clear(screen.getByLabelText("Data inicial"));
     await userEvent.type(screen.getByLabelText("Data inicial"), "2026-09-01");
     expect(await screen.findByText("Novo recorte")).toBeInTheDocument();
