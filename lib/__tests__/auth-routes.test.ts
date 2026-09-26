@@ -105,7 +105,8 @@ describe('server auth routes', () => {
     const [name, value] = cookie.split('=');
     const [payload, mac] = value.split('.');
     const altered = `${name}=${Buffer.from(JSON.stringify({ email: 'a@example.test', clients: ['beta'], exp: 9999999999 })).toString('base64url')}.${mac}`;
-    for (const headers of [new Headers(), new Headers({ cookie: altered }), new Headers({ cookie: `${name}=${payload}.${mac.slice(0, -1)}X` })]) {
+    const corruptedMac = `${mac[0] === 'A' ? 'B' : 'A'}${mac.slice(1)}`;
+    for (const headers of [new Headers(), new Headers({ cookie: altered }), new Headers({ cookie: `${name}=${payload}.${corruptedMac}` })]) {
       const sessionResponse = await session(new Request('http://localhost/api/session', { headers }));
       const dashboardResponse = await dashboard(new Request(url, { headers }));
       expect(sessionResponse.status).toBe(401);
