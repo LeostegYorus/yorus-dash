@@ -1,0 +1,16 @@
+# Yorus Dash: sistema multi-cliente de BI operacional
+
+## Correção do pedido
+Leo NÃO pediu uma seção do site institucional Data Hub. Criar produto independente em repositório `LeostegYorus/yorus-dash`, com layout funcional inspirado no HTML Basilar: sidebar escura, filtros, KPIs, gráficos, tabelas, metodologia. Cada cliente é um tenant isolado; eConfor é o primeiro cliente conectado via Meta Ads. GA4 só em etapa futura (conector existente, mas sem propriedade/credencial). NÃO copiar dados nem recomendações da Basilar, NÃO inventar números ou leads. Usuário prefere Satoshi títulos/botões, Inter corpo. Painel desktop full-width e responsivo.
+
+## API contratada
+`POST /api/login` `{email,password}` -> cookie seguro HttpOnly; `POST /api/logout`; `GET /api/session` -> `{user:{email,role},clients:[{id,name,currency,metaConnected,gaConnected}]}`; `GET /api/dashboard?client=<slug>&start=YYYY-MM-DD&end=YYYY-MM-DD&level=campaign|adset|ad` -> `{client:{id,name,currency},...MetaInsightsResult}` (MetaInsightsResult tem provider, scope, dateRange, collectedAt, rows, warnings, status). 401 não autenticado, 403 fora do membership, 400 datas inválidas, 503 configuração ausente, Cache-Control no-store. Inputs explicitamente validados. Credencial Meta APENAS no servidor, `DASH_CLIENTS_JSON` lista clientes e seus `metaAccountId`, `DASH_USERS_JSON` lista usuários com hash scrypt e `clients`; `DASH_SESSION_SECRET` assina sessão. Nunca usar query account para atribuir tenant. Não servir dados reais a usuário não autenticado. Cookie expira, membership revalidado no servidor.
+
+## eConfor
+Conta Meta autorizada `act_2851473791833439` (BRL). Conector copiado de Data Hub validado com Meta real em campanhas/conjuntos/anúncios. Não codificar conta em frontend; configuração de servidor. GA4 pendente, sem fake de conexão. Meta `clicks` = todos cliques, não cliques no link. Sem leads/CRM, não inferir qualidade de lead, venda ou CAC. UI pode mostrar investimento, impressões, cliques totais, CPM/CPC/CTR derivados e distribuição por nível.
+
+## Segurança e qualidade
+TDD RED->GREEN por comportamento, testes offline com clientes fictícios, teste de autorização cruzada (usuário A não lê B), token Meta ausente não faz fallback; no-store; sem secrets em HTML/API. Não publicar métricas reais em site aberto. Não incluir segredo em repo ou logs. Após código, rodar `pnpm test`, `pnpm lint`, `pnpm exec tsc --noEmit`, `pnpm build`, smoke local autenticado, revisão visual desktop/mobile e GitHub push. Preview público de dados reais só com autenticação internet-safe (OAuth/OIDC com MFA ou Access) verificada.
+
+## UI
+Tema único escuro: #0d0d0c fundo, #191918 painéis, #30302d linha, #ff6a00 laranja. Sidebar com marca Yorus, seletor de cliente, abas Visão geral, Campanhas, Conjuntos, Anúncios, Metodologia. Filtros data e nível, KPIs com descrições corretas, tabelas/bar charts reais, exportação CSV do recorte, estados loading/empty/error e login. No mobile navegação horizontal e tabelas roláveis. Um cliente apenas é válido: não inventar outros nomes/valores. Fonte Satoshi e Inter já em public/fonts. O logo `public/brand/yorus-symbol-orange.svg` pode ser usado. Layout NÃO é landing page nem imagem fictícia.
