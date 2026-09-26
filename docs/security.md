@@ -21,6 +21,8 @@ Verificação observada: aplicação/política lidas de volta pela API Cloudflar
 
 Na rodada do canvas interativo, os quatro cartões inicialmente semeados nesta prévia foram removidos de modo condicionado ao estado esperado, com backup privado e leitura de volta; o painel do cliente-piloto agora inicia vazio. A credencial temporária anterior foi revogada e o segredo de sessão trocado. Verificação posterior: login anterior 401, novo 200, cookie `Secure`/`HttpOnly`, cliente limitado à eConfor, API Meta com cinco campanhas, canvas vazio e acesso anônimo público 302 para Access. Não registrar senha ou token neste documento.
 
+A demonstração sintética em porta separada agora usa um worktree e build próprios, além de `DASH_DATA_DIR` distinto. Antes, as duas prévias liam o mesmo `dist`: rebuilds deixavam o processo sintético apontando para chunks removidos. Após a separação, recompilar o app real não invalidou os assets da demonstração; o teste em navegador público carregou o canvas. Atualizações futuras da demonstração requerem atualizar e reconstruir seu worktree explicitamente; não compartilhar diretório de dados entre processos, pois o controle de versão em arquivo é local ao processo.
+
 ## Camadas de acesso
 
 1. Autenticação de borda: Cloudflare Access no host `dash.yorus.top`, com política restrita e login por código no e-mail para os sócios Yorus; app e CNAME explícito verificados por leitura de volta.
