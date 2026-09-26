@@ -83,7 +83,7 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
   const [widgetDraft, setWidgetDraft] = useState<Draft | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<BuilderWidget[] | null>(null);
-  const dragRef = useRef<{ id: string; mode: "move" | "resize"; pointerId: number; startX: number; startY: number; initial: CanvasRect } | null>(null);
+  const dragRef = useRef<{ id: string; mode: "move" | "resize"; pointerId: number; startX: number; startY: number; initial: CanvasRect; lastDx: number; lastDy: number } | null>(null);
   const previewRef = useRef<BuilderWidget[] | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [start, setStart] = useState(() => `${today().slice(0, 7)}-01`);
@@ -191,7 +191,7 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
     if (!doc || busy || conflict || event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
     const initial = resolveCanvas(doc.widgets)[id];
-    dragRef.current = { id, mode, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, initial };
+    dragRef.current = { id, mode, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, initial, lastDx: 0, lastDy: 0 };
     setSelected(id); setWidgetDraft(null); setDatasetDraft(null);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -204,6 +204,8 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
     const stepX = (width - 11 * 10) / 12 + 10;
     const dx = Math.round((event.clientX - drag.startX) / stepX);
     const dy = Math.round((event.clientY - drag.startY) / 44);
+    if (dx === drag.lastDx && dy === drag.lastDy) return;
+    drag.lastDx = dx; drag.lastDy = dy;
     const rect = drag.mode === "move" ? { ...drag.initial, x: drag.initial.x + dx, y: drag.initial.y + dy } : { ...drag.initial, width: drag.initial.width + dx, height: drag.initial.height + dy };
     const next = placeCanvasWidget(doc.widgets, drag.id, rect);
     previewRef.current = next;

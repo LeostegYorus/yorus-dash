@@ -1,3 +1,4 @@
+import { Profiler } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -85,6 +86,24 @@ it("drags a selected chart two columns and resizes it on the canvas, saving both
   fireEvent.pointerMove(handle, { pointerId: 2, clientX: 300, clientY: 188 });
   fireEvent.pointerUp(handle, { pointerId: 2, clientX: 300, clientY: 188 });
   await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ width: 8, position: { x: 2, y: 2, height: 7 } }));
+});
+
+it("does not rerender the canvas for pointer events inside the same snapped grid cell", async () => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  let commits = 0;
+  render(<Profiler id="canvas" onRender={() => { commits++; }}><DashboardBuilder {...props} /></Profiler>);
+  const card = await screen.findByRole("article", { name: "Conversão" });
+  const grid = card.closest(".builder-grid") as HTMLElement;
+  vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({ width: 1200, height: 1000, x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: 1000, toJSON: () => ({}) });
+  const grip = within(card).getByRole("button", { name: "Arrastar Conversão" });
+  fireEvent.pointerDown(grip, { pointerId: 7, clientX: 100, clientY: 100 });
+  const before = commits;
+  for (let i = 0; i < 20; i++) fireEvent.pointerMove(grip, { pointerId: 7, clientX: 100 + i, clientY: 100 });
+  expect(commits).toBe(before);
+  fireEvent.pointerMove(grip, { pointerId: 7, clientX: 205, clientY: 100 });
+  expect(commits).toBeGreaterThan(before);
+  fireEvent.pointerUp(grip, { pointerId: 7, clientX: 205, clientY: 100 });
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ position: { x: 1, y: 0, height: 5 } }));
 });
 
 it("does not write a document when a chart handle is pressed without moving", async () => {
