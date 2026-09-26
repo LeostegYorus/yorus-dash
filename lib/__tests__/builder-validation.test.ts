@@ -9,6 +9,66 @@ const widget = { id: widgetId, kind: 'data', title: 'By region', width: 6, sourc
 const document = (datasets: unknown[] = [dataset], widgets: unknown[] = [widget]) => ({ version: 0, datasets, widgets });
 
 describe('builder document parser', () => {
+  describe.each(['bar', 'column', 'line', 'area', 'pie', 'donut', 'table'])('%s visualization', visualization => {
+    it('accepts manual data including null and negative cells without rewriting the document', () => {
+      const selected = { ...dataset, rows: [{ region: null, revenue: null }, { region: 'Refunds', revenue: -42.5 }] };
+      const chart = { ...widget, visualization, position: { x: 6, y: 245, height: 5 } };
+      const input = document([selected], [chart]);
+      expect(parseBuilderDocument(input)).toEqual(input);
+    });
+    it.each([
+      ['campaign', 'campaignName'], ['adset', 'adsetName'], ['ad', 'adName'],
+    ])('accepts Meta %s data with its declared dimension', (level, dimension) => {
+      const chart = { ...widget, visualization, source: { kind: 'meta', level }, dimension, measure: 'spend' };
+      expect(parseBuilderDocument(document([], [chart])).widgets[0]).toEqual(chart);
+    });
+    it('requires a nonempty dimension for manual and Meta sources', () => {
+      for (const chart of [
+        { ...widget, visualization },
+        { ...widget, visualization, source: { kind: 'meta', level: 'campaign' }, measure: 'spend', dimension: 'campaignName' },
+      ]) {
+        const withoutDimension: Partial<typeof chart> = { ...chart };
+        delete withoutDimension.dimension;
+        expect(() => parseBuilderDocument(document([dataset], [withoutDimension]))).toThrow('Invalid builder document');
+        for (const dimension of [undefined, null, '', 1, 'missing']) {
+          expect(() => parseBuilderDocument(document([dataset], [{ ...chart, dimension }]))).toThrow('Invalid builder document');
+        }
+      }
+    });
+    it('retains strict source, account, field, format and position validation', () => {
+      for (const changed of [
+        { source: { kind: 'unknown' } },
+        { source: { kind: 'manual', datasetId: crypto.randomUUID() } },
+        { source: { kind: 'manual', datasetId, accountId: 'act_1' } },
+        { accountId: 'act_1' }, { measure: 'missing' }, { measure: 'region' },
+        { dimension: 'revenue' }, { aggregation: 'median' }, { format: 'percent' },
+        { position: { x: 7, y: 0, height: 2 } },
+        { position: { x: 0, y: 1200, height: 2 } },
+        { position: { x: 0, y: 0, height: 1 } },
+        { position: { x: 0, y: 0, height: 2, accountId: 'act_1' } },
+      ]) {
+        expect(() => parseBuilderDocument(document([dataset], [{ ...widget, visualization, ...changed }]))).toThrow('Invalid builder document');
+      }
+      const meta = { ...widget, visualization, source: { kind: 'meta', level: 'campaign' }, measure: 'spend', dimension: 'campaignName' };
+      for (const changed of [
+        { source: { ...meta.source, accountId: 'act_1' } },
+        { source: { kind: 'meta', level: 'account' } },
+        { source: { kind: 'meta', level: 'constructor' } },
+        { dimension: 'adName' }, { measure: 'leads' },
+      ]) {
+        expect(() => parseBuilderDocument(document([], [{ ...meta, ...changed }]))).toThrow('Invalid builder document');
+      }
+    });
+  });
+  it.each(['scatter', 'radar', 'stacked-bar', 'Column', 'constructor', '', null, undefined, 1])('rejects unknown visualization %s', visualization => {
+    expect(() => parseBuilderDocument(document([dataset], [{ ...widget, visualization }]))).toThrow('Invalid builder document');
+  });
+  it('retains metric widgets without a dimension in existing documents', () => {
+    const metric: Partial<typeof widget> = { ...widget, visualization: 'metric' };
+    delete metric.dimension;
+    const input = document([dataset], [metric]);
+    expect(parseBuilderDocument(input)).toEqual(input);
+  });
   it('accepts a real manual dataset and chart without changing its contract', () => {
     expect(parseBuilderDocument(document())).toEqual(document());
   });

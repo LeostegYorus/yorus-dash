@@ -4,10 +4,11 @@ export type ManualDataset = {
   rows: Array<Record<string, string | number | null>>;
 };
 export const BUILDER_MAX_ROW = 1199;
+export type BuilderVisualization = 'metric' | 'bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'table';
 type WidgetBase = { id: string; title: string; width: number; note?: string; position?: { x: number; y: number; height: number } };
 export type BuilderWidget = WidgetBase & (
   { kind: 'text'; body: string } |
-  { kind: 'data'; source: { kind: 'manual'; datasetId: string } | { kind: 'meta'; level: 'campaign' | 'adset' | 'ad' }; visualization: 'metric' | 'bar' | 'table'; dimension?: string; measure: string; aggregation: 'sum' | 'avg' | 'count'; format: 'number' | 'currency' | 'percent' }
+  { kind: 'data'; source: { kind: 'manual'; datasetId: string } | { kind: 'meta'; level: 'campaign' | 'adset' | 'ad' }; visualization: BuilderVisualization; dimension?: string; measure: string; aggregation: 'sum' | 'avg' | 'count'; format: 'number' | 'currency' | 'percent' }
 );
 export type BuilderDocument = { version: number; datasets: ManualDataset[]; widgets: BuilderWidget[] };
 export class BuilderValidationError extends Error { name = 'BuilderValidationError'; constructor() { super('Invalid builder document'); } }
@@ -73,7 +74,7 @@ function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWi
     text(value.body, 4000, true, true);
   } else if (value.kind === 'data') {
     keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note', 'position']);
-    if (!object(value.source) || !['metric', 'bar', 'table'].includes(value.visualization as string) || !['sum', 'avg', 'count'].includes(value.aggregation as string) || !['number', 'currency', 'percent'].includes(value.format as string)) invalid();
+    if (!object(value.source) || !['metric', 'bar', 'column', 'line', 'area', 'pie', 'donut', 'table'].includes(value.visualization as string) || !['sum', 'avg', 'count'].includes(value.aggregation as string) || !['number', 'currency', 'percent'].includes(value.format as string)) invalid();
     // No source in this schema declares a 0..1 proportion; percent would mislabel raw totals.
     if (value.format === 'percent') invalid();
     if (value.dimension !== undefined && (typeof value.dimension !== 'string' || !value.dimension)) invalid();
