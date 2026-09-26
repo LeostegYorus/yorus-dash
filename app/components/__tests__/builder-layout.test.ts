@@ -6,6 +6,11 @@ const first: BuilderWidget = { id: '123e4567-e89b-42d3-a456-426614174001', title
 const second: BuilderWidget = { id: '123e4567-e89b-42d3-a456-426614174002', title: 'Second', kind: 'text', body: 'B', width: 12, position: { x: 0, y: 1199, height: 5 } };
 
 describe('canvas placement', () => {
+  it.each(['column', 'line', 'area', 'pie', 'donut'] as const)('gives a new %s preset room for its plot and legend', visualization => {
+    const widget: BuilderWidget = { id: first.id, title: 'Visual', kind: 'data', width: 6, source: { kind: 'meta', level: 'campaign' }, visualization, dimension: 'campaignName', measure: 'spend', aggregation: 'sum', format: 'currency' };
+    expect(resolveCanvas([widget])[widget.id].height).toBe(9);
+    expect(resolveCanvas([{ ...widget, position: { x: 0, y: 0, height: 3 } }])[widget.id].height).toBe(3);
+  });
   it('lays out a valid legacy document with 50 full-width widgets without crashing', () => {
     const legacy = Array.from({ length: 50 }, (_, index): BuilderWidget => ({ id: `123e4567-e89b-42d3-a456-${String(index).padStart(12, '0')}`, title: 'First', kind: 'text', body: 'A', width: 12 }));
     expect(parseBuilderDocument({ version: 0, datasets: [], widgets: legacy }).widgets).toHaveLength(50);

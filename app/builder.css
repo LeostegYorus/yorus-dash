@@ -20,8 +20,16 @@
 .builder-chart-palette { margin: 0 0 27px; }
 .builder-chart-palette h4 { margin-bottom: 6px; }
 .builder-chart-palette p { color: var(--builder-soft); font-size: 11px; line-height: 1.5; margin: 0 0 10px; }
-.builder-chart-palette > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.builder-chart-palette button { min-height: 38px; text-align: left; background: #24221f; }
+.builder-visual-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 10px 0; }
+.builder .builder-visual-gallery button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 64px; min-width: 0; padding: 7px 3px; font-size: 10px; background: #20201e; border-color: #45433d; }
+.builder-visual-gallery svg { flex-shrink: 0; color: #dbd9d0; }
+.builder .builder-visual-gallery button[aria-pressed="true"] { border-color: #ff8736; background: #38271b; color: #ffc096; }
+.builder-visual-gallery button[aria-pressed="true"] svg, .builder-visual-gallery button:hover:not(:disabled) svg { color: #ffad73; }
+.builder .builder-text-preset { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; }
+.builder-text-preset svg { width: 21px; height: 21px; }
+.builder-visual-context { color: var(--builder-soft); font-size: 11px; line-height: 1.5; margin: 0; }
+.builder-sources .builder-chart-palette { padding-bottom: 20px; border-bottom: 1px solid var(--builder-line); }
+.builder-chart-palette button { touch-action: manipulation; }
 .builder-pane-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
 .builder-pane-heading h3, .builder-pane-heading h4 { margin-bottom: 2px; }
 .builder-pane-heading p { margin: 0; }

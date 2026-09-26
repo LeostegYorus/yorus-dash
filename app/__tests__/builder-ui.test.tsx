@@ -139,6 +139,81 @@ it("keeps a chart's placed geometry when editing its data title", async () => {
   await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ title: "Conversão revisada", width: 8, position: { x: 2, y: 2, height: 7 } }));
 });
 
+it("offers a named icon gallery of preset visual types instead of only three text buttons", async () => {
+  store();
+  render(<DashboardBuilder {...props} metaConnected />);
+  const gallery = await screen.findByRole("group", { name: "Criar visual" });
+  for (const label of ["métrica", "barras", "colunas", "linhas", "área", "pizza", "rosca", "tabela"]) {
+    const button = within(gallery).getByRole("button", { name: `Adicionar gráfico de ${label}` });
+    expect(button.querySelector('svg')).not.toBeNull();
+  }
+});
+
+it.each([
+  ["column", "colunas", "Colunas"], ["line", "linhas", "Linhas"], ["area", "área", "Área"], ["pie", "pizza", "Pizza"], ["donut", "rosca", "Rosca"],
+])("creates a %s preset with real source bindings and opens its fields", async (kind, label, title) => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [] });
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  await user.click(await screen.findByRole("button", { name: `Adicionar gráfico de ${label}` }));
+  await waitFor(() => expect(api.document.widgets).toHaveLength(1));
+  expect(api.document.widgets[0]).toMatchObject({ title: `${title} · Leads`, visualization: kind, dimension: "canal", measure: "taxa", source: { kind: "manual", datasetId: dataset.id } });
+  expect(screen.getByLabelText("Medida")).toHaveValue("taxa");
+  expect(screen.getByLabelText("Dimensão")).toHaveValue("canal");
+  expect(screen.getByLabelText("Visualização")).toHaveValue(kind);
+});
+
+it("switches a selected visual from the icon gallery without losing its fields or geometry", async () => {
+  const placed = { ...manualWidget, visualization: "bar", dimension: "canal", width: 8, position: { x: 2, y: 3, height: 8 } };
+  const api = store({ version: 1, datasets: [dataset], widgets: [placed] });
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  await user.click(await screen.findByRole("article", { name: "Conversão" }));
+  await user.click(screen.getByRole("button", { name: "Usar visual de rosca" }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ ...placed, visualization: "donut" }));
+  expect(screen.getByRole("button", { name: "Usar visual de rosca" })).toHaveAttribute("aria-pressed", "true");
+  await user.click(screen.getByRole("button", { name: "Editar dados e formato" }));
+  await user.clear(screen.getByLabelText("Título da visualização"));
+  await user.type(screen.getByLabelText("Título da visualização"), "Participação");
+  await user.click(screen.getByRole("button", { name: "Usar visual de pizza" }));
+  expect(api.document.widgets[0]).toMatchObject({ visualization: "donut", title: "Conversão" });
+  await user.click(screen.getByRole("button", { name: "Salvar visualização" }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ ...placed, visualization: "pie", title: "Participação" }));
+});
+
+it.each(['gallery', 'form'])("preserves the effective size of a legacy metric when switching its type via %s", async method => {
+  const api = store({ version: 1, datasets: [dataset], widgets: [manualWidget] });
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  await user.click(await screen.findByRole('article', { name: 'Conversão' }));
+  if (method === 'form') await user.click(screen.getByRole('button', { name: 'Editar dados e formato' }));
+  await user.click(screen.getByRole('button', { name: 'Usar visual de colunas' }));
+  if (method === 'form') await user.click(screen.getByRole('button', { name: 'Salvar visualização' }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ visualization: 'column', dimension: 'canal', position: { x: 0, y: 0, height: 5 } }));
+});
+
+it("opens an unbound preset without inventing data when no source is available", async () => {
+  const api = store();
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} />);
+  await user.click(await screen.findByRole("button", { name: "Adicionar gráfico de pizza" }));
+  expect(screen.getByLabelText("Visualização")).toHaveValue("pie");
+  expect(screen.getByLabelText("Medida")).toHaveValue("");
+  expect(screen.getByLabelText("Conjunto")).toHaveValue("");
+  expect(api.document.widgets).toHaveLength(0);
+  expect(screen.getByText(/Nenhuma fonte compatível/)).toBeInTheDocument();
+});
+
+it.each([['column', 'colunas'], ['line', 'linhas'], ['area', 'área'], ['pie', 'pizza'], ['donut', 'rosca']])("renders saved %s widgets as the selected visual, not fallback bars", async (visualization, label) => {
+  store({ version: 1, datasets: [dataset], widgets: [{ ...manualWidget, visualization, dimension: 'canal' }] });
+  render(<DashboardBuilder {...props} admin={false} />);
+  const card = await screen.findByRole('article', { name: 'Conversão' });
+  expect(within(card).getByRole('img', { name: `Gráfico de ${label}` })).toBeInTheDocument();
+  expect(card.querySelector('.builder-bars')).toBeNull();
+  expect(within(card).getByText(/Planilha comercial/)).toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: 'Criar visual' })).toBeNull();
+});
+
 it("adds a connected Meta bar chart to an empty canvas from the chart palette", async () => {
   const api = store();
   const user = userEvent.setup();
@@ -149,6 +224,8 @@ it("adds a connected Meta bar chart to an empty canvas from the chart palette", 
   const chart = await screen.findByRole("article", { name: "Gasto por campanha" });
   expect(chart).toHaveAttribute("data-selected", "true");
   expect(within(chart).getByRole("button", { name: "Redimensionar Gasto por campanha" })).toBeInTheDocument();
+  expect(within(screen.getByLabelText('Medida')).getByRole('option', { name: 'Investimento' })).toHaveValue('spend');
+  expect(within(screen.getByLabelText('Dimensão')).getByRole('option', { name: 'Campanha' })).toHaveValue('campaignName');
 });
 
 it("clamps a chart inside the canvas when its width is changed in the edit form", async () => {

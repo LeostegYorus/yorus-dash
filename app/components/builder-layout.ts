@@ -3,7 +3,7 @@ import { BUILDER_MAX_ROW, type BuilderWidget } from '../../lib/builder-types';
 export type CanvasRect = { x: number; y: number; width: number; height: number };
 const COLUMNS = 12;
 const MAX_ROWS = BUILDER_MAX_ROW;
-const defaultHeight = (widget: BuilderWidget) => widget.kind === 'data' && widget.visualization === 'table' ? 8 : widget.kind === 'data' && widget.visualization === 'bar' ? 7 : 5;
+const defaultHeight = (widget: BuilderWidget) => widget.kind === 'text' || widget.visualization === 'metric' ? 5 : widget.visualization === 'table' ? 8 : widget.visualization === 'bar' ? 7 : 9;
 const overlaps = (a: CanvasRect, b: CanvasRect) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 const free = (rect: CanvasRect, occupied: CanvasRect[]) => occupied.every(other => !overlaps(rect, other));
 
