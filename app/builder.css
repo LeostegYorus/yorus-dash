@@ -56,7 +56,8 @@
 .builder-widget[data-selected="true"] .builder-widget-actions, .builder-widget:hover .builder-widget-actions, .builder-widget:focus-within .builder-widget-actions { display: flex; }
 .builder-widget-actions button { padding: 4px 6px; font-size: 10px; }
 .builder-metric { display: block; font: 800 clamp(13px, 12cqi, 34px)/1.15 Satoshi, Inter, sans-serif; letter-spacing: -.035em; white-space: nowrap; overflow-x: auto; font-variant-numeric: tabular-nums; }
-.builder-copy { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.builder-text-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; flex-grow: 1; flex-shrink: 1; flex-basis: 0; padding-right: 3px; }
+.builder-copy { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin: 0; }
 .builder-provenance, .builder-note { color: var(--builder-soft); font-size: 10px; line-height: 1.5; margin: 14px 0 0; overflow-wrap: anywhere; }
 .builder-note { border-top: 1px solid var(--builder-line); padding-top: 8px; }
 .builder-warning, .builder-error { color: #ffd09a; background: #382518; border: 1px solid #80512a; border-radius: 6px; font-size: 11px; line-height: 1.5; padding: 9px 11px; }
