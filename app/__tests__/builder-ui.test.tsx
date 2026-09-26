@@ -26,6 +26,122 @@ const dataset = { id: "1e4162b2-4bc9-40a0-966e-e7882d8b2080", name: "Leads", sou
 const manualWidget = { id: "c4cc1c7d-869a-4e1c-871d-e1f3c7d425a1", kind: "data", title: "Conversão", width: 6, source: { kind: "manual", datasetId: dataset.id }, visualization: "metric", measure: "taxa", aggregation: "avg", format: "number" };
 const metaWidget = { id: "73c02eab-f267-44f4-93e5-e72fd58a18e1", kind: "data", title: "Gasto", width: 6, source: { kind: "meta", level: "campaign" }, visualization: "metric", measure: "spend", aggregation: "sum", format: "currency" };
 
+it.each([['avg', '20'], ['count', '2']])("preserves saved legacy Meta %s metrics", async (aggregation, expected) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('/api/clients/')) return reply({ version: 1, datasets: [], widgets: [{ ...metaWidget, aggregation, format: 'number' }] });
+    const q = new URL(url, 'http://local.test').searchParams;
+    return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: q.get('start'), end: q.get('end') }, status: 'succeeded', warnings: [], totals: { spend: 40 }, rows: [
+      { spend: 10, impressions: 100, clicks: 10 }, { spend: 30, impressions: 120, clicks: 20 },
+    ] });
+  }));
+  render(<DashboardBuilder {...props} metaConnected />);
+  const card = await screen.findByRole('article', { name: 'Gasto' });
+  expect(await within(card).findByText(expected)).toBeInTheDocument();
+});
+
+it.each([['pie', 'reach'], ['donut', 'ctr']])("does not turn nonadditive %s/%s values into shares of a false total", async (visualization, measure) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('/api/clients/')) return reply({ version: 1, datasets: [], widgets: [{ ...metaWidget, visualization, measure, dimension: 'campaignName', format: 'number' }] });
+    const q = new URL(url, 'http://local.test').searchParams;
+    return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: q.get('start'), end: q.get('end') }, status: 'succeeded', warnings: [], rows: [
+      { campaignId: '1', campaignName: 'A', spend: 10, impressions: 100, clicks: 10, reach: 80, ctr: 0.05 },
+      { campaignId: '2', campaignName: 'B', spend: 30, impressions: 120, clicks: 20, reach: 60, ctr: 0.1 },
+    ] });
+  }));
+  render(<DashboardBuilder {...props} metaConnected />);
+  const card = await screen.findByRole('article', { name: 'Gasto' });
+  expect(await within(card).findByText(/não representam partes de um total/)).toBeInTheDocument();
+  expect(within(card).queryByRole('img')).not.toBeInTheDocument();
+});
+
+it("keeps a legacy average table editable without silently changing its aggregation", async () => {
+  const api = store({ version: 1, datasets: [], widgets: [{ ...metaWidget, aggregation: 'avg', visualization: 'table', dimension: 'campaignName' }] });
+  const user = userEvent.setup();render(<DashboardBuilder {...props} metaConnected />);
+  await user.click(await screen.findByRole('article', { name: 'Gasto' }));
+  await user.click(screen.getByRole('button', { name: 'Editar dados e formato' }));
+  await user.clear(screen.getByLabelText('Título da visualização'));await user.type(screen.getByLabelText('Título da visualização'), 'Média legada');
+  await user.click(screen.getByRole('button', { name: 'Salvar visualização' }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ title: 'Média legada', aggregation: 'avg' }));
+  expect(api.document.widgets[0]).not.toHaveProperty('measures');
+});
+
+it("does not flag a complete spend widget for an unrelated missing optional metric", async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('/api/clients/')) return reply({ version: 1, datasets: [], widgets: [metaWidget, { ...metaWidget, id: crypto.randomUUID(), title: 'Custos', visualization: 'table', dimension: 'campaignName', measures: ['spend', 'cpc'] }] });
+    const q = new URL(url, 'http://local.test').searchParams;
+    return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: q.get('start'), end: q.get('end') }, status: 'partial', warnings: ['Meta rows have missing metric values; left null'], totals: { spend: 10, cpc: null }, rows: [{ campaignId: '1', campaignName: 'A', spend: 10, impressions: 100, clicks: 10, cpc: null }] });
+  }));
+  render(<DashboardBuilder {...props} metaConnected />);
+  const card = await screen.findByRole('article', { name: 'Gasto' });
+  expect(await within(card).findByText(/R\$\s?10,00/)).toBeInTheDocument();
+  expect(card.querySelector('.builder-warning')).toBeNull();
+  const table = screen.getByRole('article', { name: 'Custos' });
+  expect(table.querySelector('.builder-warning')).not.toBeNull();
+});
+
+it("uses the Meta summary for reach instead of summing overlapping audiences", async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('/api/clients/')) return reply({ version: 1, datasets: [], widgets: [{ ...metaWidget, measure: 'reach', format: 'number' }] });
+    const query = new URL(url, 'http://local.test').searchParams;
+    return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: query.get('start'), end: query.get('end') }, status: 'succeeded', warnings: [], totals: { reach: 100 }, metrics: [], rows: [
+      { campaignId: '1', campaignName: 'A', spend: 10, impressions: 100, clicks: 10, reach: 90 },
+      { campaignId: '2', campaignName: 'B', spend: 20, impressions: 120, clicks: 20, reach: 90 },
+    ] });
+  }));
+  render(<DashboardBuilder {...props} metaConnected />);
+  const card = await screen.findByRole('article', { name: 'Gasto' });
+  expect(await within(card).findByText('100')).toBeInTheDocument();
+  expect(within(card).queryByText('180')).not.toBeInTheDocument();
+});
+
+it("requests and renders multiple Meta table measures without averaging rates or merging names", async () => {
+  const columns = ['spend', 'reach', 'ctr', 'actions:lead'];
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.startsWith('/api/clients/')) return reply({ version: 1, datasets: [], widgets: [{ ...metaWidget, visualization: 'table', dimension: 'campaignName', measures: columns }] });
+    const query = new URL(url, 'http://local.test').searchParams;
+    return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: query.get('start'), end: query.get('end') }, status: 'succeeded', warnings: [], metrics: [], rows: [
+      { campaignId: '1', campaignName: 'Mesmo nome', spend: 10, impressions: 100, clicks: 10, reach: 90, ctr: 0.125, 'actions:lead': null },
+      { campaignId: '2', campaignName: 'Mesmo nome', spend: 20, impressions: 120, clicks: 20, reach: 80, ctr: 0.2, 'actions:lead': 4 },
+    ] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<DashboardBuilder {...props} metaConnected />);
+  const table = await within(await screen.findByRole('article', { name: 'Gasto' })).findByRole('table');
+  expect(within(table).getAllByRole('columnheader')).toHaveLength(5);
+  expect(within(table).getAllByRole('row')).toHaveLength(3);
+  expect(table).toHaveTextContent('Mesmo nome · 1');
+  expect(table).toHaveTextContent('Mesmo nome · 2');
+  expect(table).toHaveTextContent('12,5%');
+  expect(table).toHaveTextContent('Sem valores informados');
+  const requested = fetcher.mock.calls.map(([url]) => new URL(url, 'http://local.test').searchParams.get('metrics')).filter(Boolean).join(',');
+  for (const column of columns) expect(requested.split(',')).toContain(column);
+});
+
+it("searches the Meta catalogue and saves several table columns including discovered custom events", async () => {
+  const api = store({ version: 1, datasets: [], widgets: [{ ...metaWidget, visualization: 'table', dimension: 'campaignName' }] });
+  const baseFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const query = new URL(url, 'http://local.test').searchParams;
+    if (query.get('catalog') === '1') return reply({ provider: 'meta', client: { id: 'alpha' }, scope: { level: 'campaign' }, dateRange: { start: query.get('start'), end: query.get('end') }, status: 'succeeded', warnings: [], metrics: [{ id: 'conversions:offsite_conversion.fb_pixel_custom.venda' }], rows: [] });
+    return baseFetch(url, init);
+  }));
+  const user = userEvent.setup();
+  render(<DashboardBuilder {...props} metaConnected />);
+  await user.click(await screen.findByRole('article', { name: 'Gasto' }));
+  await user.click(screen.getByRole('button', { name: 'Editar dados e formato' }));
+  const search = screen.getByLabelText('Buscar métricas Meta');
+  expect(screen.queryByLabelText('Formato')).not.toBeInTheDocument();
+  expect(screen.getByText('Formato automático por coluna: moeda, número ou percentual conforme a métrica.')).toBeInTheDocument();
+  await user.type(search, 'alcance');
+  await user.click(screen.getByRole('checkbox', { name: 'Alcance (reach)' }));
+  await user.clear(search);await user.type(search, 'ctr');
+  await user.click(screen.getByRole('checkbox', { name: 'CTR (ctr)' }));
+  await user.clear(search);await user.type(search, 'venda');
+  await user.click(await screen.findByRole('checkbox', { name: /conversions:offsite_conversion.fb_pixel_custom.venda/ }));
+  await user.click(screen.getByRole('button', { name: 'Salvar visualização' }));
+  await waitFor(() => expect(api.document.widgets[0]).toMatchObject({ measure: 'spend', measures: ['spend', 'reach', 'ctr', 'conversions:offsite_conversion.fb_pixel_custom.venda'] }));
+});
+
 it("creates a manual dataset and data widget with versioned persistence", async () => {
   const api = store();
   const user = userEvent.setup();

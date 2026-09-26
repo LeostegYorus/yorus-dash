@@ -3,24 +3,28 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { placeCanvasWidget, resolveCanvas, type CanvasRect } from "./builder-layout";
 import BuilderChart from "./builder-chart";
+import MetaMetricPicker from "./meta-metric-picker";
+import { BASE_META_METRICS, getMetaMetric, type MetaMetric } from "../../lib/meta-metrics";
 import { VisualGallery, VisualIcon, VISUAL_PRESETS } from "./builder-visuals";
 import type { BuilderDocument, BuilderWidget, BuilderVisualization, ManualDataset } from "../../lib/builder-types";
 import "../builder.css";
 
 type Level = "campaign" | "adset" | "ad";
 type DataWidget = Extract<BuilderWidget, { kind: "data" }>;
-type MetaResult = { client: { id: string }; provider: "meta"; scope: { level: Level }; dateRange: { start: string; end: string }; status: "succeeded" | "partial"; warnings: string[]; rows: Array<Record<string, unknown>> };
+type MetaResult = { client: { id: string }; provider: "meta"; scope: { level: Level }; dateRange: { start: string; end: string }; status: "succeeded" | "partial"; warnings: string[]; rows: Array<Record<string, unknown>>; totals?: Record<string, number | null>; metrics?: Array<{ id: string }>; unavailableMetrics?: string[] };
 type MetaState = { status: "loading" | "error" | "ready"; error?: string; result?: MetaResult };
 type Field = ManualDataset["fields"][number];
-type Draft = { id?: string; title: string; note: string; width: number; kind: "text" | "data"; body: string; sourceKind: "manual" | "meta"; datasetId: string; level: Level; visualization: BuilderVisualization; dimension: string; measure: string; aggregation: "sum" | "avg" | "count"; format: "number" | "currency" | "percent" };
+type Draft = { id?: string; title: string; note: string; width: number; kind: "text" | "data"; body: string; sourceKind: "manual" | "meta"; datasetId: string; level: Level; visualization: BuilderVisualization; dimension: string; measure: string; measures: string[]; aggregation: "sum" | "avg" | "count"; format: "number" | "currency" | "percent" };
 const levelDimension: Record<Level, string> = { campaign: "campaignName", adset: "adsetName", ad: "adName" };
 const metaMeasures = ["spend", "impressions", "clicks"];
 const metaFieldLabels: Record<string, string> = { spend: "Investimento", impressions: "Impressões", clicks: "Cliques", campaignName: "Campanha", adsetName: "Conjunto de anúncios", adName: "Anúncio" };
+const radialWarning = "Esta métrica não é aditiva: seus valores não representam partes de um total. Use barras, colunas ou tabela.";
+const invalidRadial = (kind: string, visualization: string, measure: string) => kind === "meta" && ["pie", "donut"].includes(visualization) && !getMetaMetric(measure)?.additive;
 const today = () => new Date().toISOString().slice(0, 10);
-const initialDraft = (datasetId = ""): Draft => ({ title: "", note: "", width: 6, kind: "data", body: "", sourceKind: "manual", datasetId, level: "campaign", visualization: "metric", dimension: "", measure: "", aggregation: "sum", format: "number" });
+const initialDraft = (datasetId = ""): Draft => ({ title: "", note: "", width: 6, kind: "data", body: "", sourceKind: "manual", datasetId, level: "campaign", visualization: "metric", dimension: "", measure: "", measures: [], aggregation: "sum", format: "number" });
 const makeDraft = (widget: BuilderWidget): Draft => widget.kind === "text"
   ? { ...initialDraft(), id: widget.id, kind: "text", title: widget.title, body: widget.body, width: widget.width, note: widget.note ?? "" }
-  : { ...initialDraft(), id: widget.id, title: widget.title, width: widget.width, note: widget.note ?? "", sourceKind: widget.source.kind, datasetId: widget.source.kind === "manual" ? widget.source.datasetId : "", level: widget.source.kind === "meta" ? widget.source.level : "campaign", visualization: widget.visualization, dimension: widget.dimension ?? "", measure: widget.measure, aggregation: widget.aggregation, format: widget.format };
+  : { ...initialDraft(), id: widget.id, title: widget.title, width: widget.width, note: widget.note ?? "", sourceKind: widget.source.kind, datasetId: widget.source.kind === "manual" ? widget.source.datasetId : "", level: widget.source.kind === "meta" ? widget.source.level : "campaign", visualization: widget.visualization, dimension: widget.dimension ?? "", measure: widget.measure, measures: widget.source.kind === "meta" && widget.visualization === "table" ? widget.measures ?? [widget.measure] : [], aggregation: widget.aggregation, format: widget.format };
 function formatValue(value: number, format: DataWidget["format"], currency: string) {
   if (format === "currency") return new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(value);
   if (format === "percent") return new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 }).format(value);
@@ -39,6 +43,17 @@ function aggregate(rows: Array<Record<string, unknown>>, widget: DataWidget, dim
   }
   return [...groups].map(([label, values]) => ({ label, value: values.length ? widget.aggregation === "count" || widget.aggregation === "sum" ? values.reduce((sum, n) => sum + n, 0) : values.reduce((sum, n) => sum + n, 0) / values.length : null }));
 }
+function metaGroups(rows: Array<Record<string, unknown>>, widget: DataWidget, totals?: Record<string, number | null>) {
+  if (!widget.measures && metaMeasures.includes(widget.measure) && widget.aggregation !== "sum") return aggregate(rows, widget, widget.visualization === "metric" ? undefined : widget.dimension);
+  const numeric = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
+  if (widget.visualization === "metric") {
+    const value = totals && Object.hasOwn(totals, widget.measure) ? numeric(totals[widget.measure]) : metaMeasures.includes(widget.measure) && rows.every(row => numeric(row[widget.measure]) !== null) ? rows.reduce((sum, row) => sum + (row[widget.measure] as number), 0) : null;
+    return [{ label: "Total", value }];
+  }
+  const dimension = widget.dimension ?? "campaignName";
+  const labels = rows.map(row => String(row[dimension] ?? "Não informado"));
+  return rows.map((row, index) => ({ label: labels.filter(label => label === labels[index]).length > 1 ? `${labels[index]} · ${row[dimension.replace("Name", "Id")] ?? index + 1}` : labels[index], value: numeric(row[widget.measure]) }));
+}
 function isBuilderDocument(value: unknown): value is BuilderDocument {
   if (!value || typeof value !== "object") return false;
   const doc = value as Partial<BuilderDocument>;
@@ -56,13 +71,18 @@ function WidgetCard({ widget, dataset, meta, currency, admin, busy, rect, select
   let content;
   if (widget.kind === "text") content = <div className="builder-text-scroll"><p className="builder-copy">{widget.body}</p>{widget.note && <p className="builder-note">{widget.note}</p>}</div>;
   else {
-    const unavailable = widget.source.kind === "meta" ? meta?.status === "error" ? meta.error : meta?.status === "loading" || !meta ? "Consultando Meta Ads…" : null : !dataset ? "Conjunto manual indisponível." : null;
+    const unavailable = invalidRadial(widget.source.kind, widget.visualization, widget.measure) ? radialWarning : widget.source.kind === "meta" ? meta?.status === "error" ? meta.error : meta?.status === "loading" || !meta ? "Consultando Meta Ads…" : null : !dataset ? "Conjunto manual indisponível." : null;
     const rows = widget.source.kind === "manual" ? dataset?.rows as Array<Record<string, unknown>> | undefined : meta?.result?.rows;
-    const grouped = rows ? aggregate(rows, widget, widget.visualization === "metric" ? undefined : widget.dimension) : [];
+    const grouped = rows ? widget.source.kind === "meta" ? metaGroups(rows, widget, meta?.result?.totals) : aggregate(rows, widget, widget.visualization === "metric" ? undefined : widget.dimension) : [];
     const max = Math.max(0, ...grouped.map(item => item.value ?? 0));
+    const columns = widget.source.kind === "meta" ? widget.measures ?? [widget.measure] : [widget.measure];
+    const globalWarnings = (meta?.result?.warnings ?? []).filter(warning => !/^(Meta rows have missing metric values|Meta summary unavailable|Meta metric unavailable:|Meta field unavailable:)/.test(warning));
+    const missingValues = rows?.some(row => columns.some(id => typeof row[id] !== "number" || !Number.isFinite(row[id]))) || (widget.visualization === "metric" && grouped[0]?.value == null);
+    const metaWarning = widget.source.kind === "meta" && meta?.result?.status === "partial" && (globalWarnings.length || !meta.result.warnings.length || missingValues)
+      ? globalWarnings.length ? `Consulta parcial: resultados podem estar incompletos. ${globalWarnings.join(" ")}` : "Algumas métricas não foram retornadas neste recorte. Células sem valores não significam zero." : null;
     content = <>
-      {unavailable ? <p className="builder-empty-inline" role="status">{unavailable}</p> : !rows?.length ? <p className="builder-empty-inline">Nenhuma linha para esta visualização.</p> : widget.visualization === "metric" ? <strong className="builder-metric">{grouped[0]?.value == null ? "Sem valores informados" : formatValue(grouped[0].value, widget.format, currency)}</strong> : widget.visualization === "table" ? <div className="builder-table-scroll"><table><thead><tr><th>{widget.dimension || "Grupo"}</th><th>{widget.measure}</th></tr></thead><tbody>{grouped.map(item => <tr key={item.label}><td>{item.label}</td><td>{item.value == null ? "Sem valores informados" : formatValue(item.value, widget.format, currency)}</td></tr>)}</tbody></table></div> : widget.visualization !== "bar" ? <BuilderChart type={widget.visualization} data={grouped} formatValue={value => formatValue(value, widget.format, currency)} /> : <div className="builder-bars">{grouped.map(item => <div className="builder-bar-row" key={item.label}><span>{item.label}</span><strong>{item.value == null ? "Sem valores informados" : formatValue(item.value, widget.format, currency)}</strong><span className="builder-bar-track"><span style={{ width: `${max > 0 ? Math.max(0, (item.value ?? 0) / max * 100) : 0}%` }} /></span></div>)}</div>}
-      {meta?.result?.status === "partial" && widget.source.kind === "meta" && <p className="builder-warning">Consulta parcial: resultados podem estar incompletos. {meta.result.warnings.join(" ")}</p>}
+      {unavailable ? <p className="builder-empty-inline" role="status">{unavailable}</p> : !rows?.length ? <p className="builder-empty-inline">Nenhuma linha para esta visualização.</p> : widget.visualization === "metric" ? <strong className="builder-metric">{grouped[0]?.value == null ? "Sem valores informados" : formatValue(grouped[0].value, widget.format, currency)}</strong> : widget.visualization === "table" ? <div className="builder-table-scroll"><table><thead><tr><th>{widget.source.kind === "meta" ? metaFieldLabels[widget.dimension ?? ""] ?? "Categoria" : widget.dimension || "Grupo"}</th>{columns.map(id => <th key={id}>{widget.source.kind === "meta" ? getMetaMetric(id)?.label ?? id : id}</th>)}</tr></thead><tbody>{grouped.map((item, index) => <tr key={item.label}><td>{item.label}</td>{columns.map(id => { const raw = widget.source.kind === "meta" && (widget.measures || widget.aggregation === "sum" || !metaMeasures.includes(widget.measure)) ? rows[index]?.[id] : item.value; const value = typeof raw === "number" && Number.isFinite(raw) ? raw : null; return <td key={id}>{value === null ? "Sem valores informados" : formatValue(value, widget.source.kind === "meta" ? (!widget.measures && metaMeasures.includes(widget.measure) ? widget.format : getMetaMetric(id)?.format ?? "number") : widget.format, currency)}</td>; })}</tr>)}</tbody></table></div> : widget.visualization !== "bar" ? <BuilderChart type={widget.visualization} data={grouped} formatValue={value => formatValue(value, widget.format, currency)} /> : <div className="builder-bars">{grouped.map(item => <div className="builder-bar-row" key={item.label}><span>{item.label}</span><strong>{item.value == null ? "Sem valores informados" : formatValue(item.value, widget.format, currency)}</strong><span className="builder-bar-track"><span style={{ width: `${max > 0 ? Math.max(0, (item.value ?? 0) / max * 100) : 0}%` }} /></span></div>)}</div>}
+      {metaWarning && <p className="builder-warning">{metaWarning}</p>}
       <p className="builder-provenance">{widget.source.kind === "manual" ? `Informado manualmente · ${dataset?.sourceLabel ?? "Fonte indisponível"} · ${dataset?.periodStart ?? ""} a ${dataset?.periodEnd ?? ""}` : `Meta Ads · ${widget.source.level}`}</p>
     </>;
   }
@@ -85,6 +105,7 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
   const [fieldType, setFieldType] = useState<Field["type"]>("text");
   const [widgetDraft, setWidgetDraft] = useState<Draft | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [catalogState, setCatalogState] = useState<{ key: string; metrics: MetaMetric[]; error: string }>({ key: "", metrics: [], error: "" });
   const [dragPreview, setDragPreview] = useState<BuilderWidget[] | null>(null);
   const dragRef = useRef<{ id: string; mode: "move" | "resize"; pointerId: number; startX: number; startY: number; initial: CanvasRect; lastDx: number; lastDy: number } | null>(null);
   const previewRef = useRef<BuilderWidget[] | null>(null);
@@ -105,8 +126,9 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
   }, [url, revision]);
   const levels = metaConnected ? [...new Set(doc?.widgets.flatMap(widget => widget.kind === "data" && widget.source.kind === "meta" ? [widget.source.level] : []) ?? [])] : [];
   const levelKey = levels.sort().join(",");
+  const measureKey = JSON.stringify(Object.fromEntries(levels.map(level => [level, [...new Set(doc?.widgets.flatMap(widget => widget.kind === "data" && widget.source.kind === "meta" && widget.source.level === level ? widget.visualization === "table" ? widget.measures ?? [widget.measure] : [widget.measure] : []) ?? [])].sort()])));
   const validMetaDates = /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end) && start <= end && (Date.parse(end) - Date.parse(start)) <= 92 * 86400000;
-  const requestKey = `${clientId}:${start}:${end}:${levelKey}`;
+  const requestKey = `${clientId}:${start}:${end}:${levelKey}:${measureKey}`;
   const meta = metaState.key === requestKey ? metaState.results : {};
   useEffect(() => {
     if (!levelKey || !validMetaDates) return;
@@ -114,6 +136,8 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
     const requested = levelKey.split(",") as Level[];
     for (const level of requested) {
       const params = new URLSearchParams({ client: clientId, start, end, level });
+      const selectedMeasures: string[] = JSON.parse(measureKey)[level] ?? [];
+      if (selectedMeasures.some(id => !metaMeasures.includes(id))) params.set("metrics", [...new Set([...metaMeasures, ...selectedMeasures])].join(","));
       fetch(`/api/dashboard?${params}`, { cache: "no-store", signal: controller.signal }).then(async response => {
         if (!response.ok) throw new Error("Meta Ads indisponível para este recorte.");
         const value: unknown = await response.json();
@@ -122,7 +146,24 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
       }).then(result => { if (!controller.signal.aborted) setMetaState(current => ({ key: requestKey, results: { ...(current.key === requestKey ? current.results : {}), [level]: { status: "ready", result } } })); }).catch(reason => { if (!controller.signal.aborted) setMetaState(current => ({ key: requestKey, results: { ...(current.key === requestKey ? current.results : {}), [level]: { status: "error", error: reason instanceof Error ? reason.message : "Meta Ads indisponível." } } })); });
     }
     return () => controller.abort();
-  }, [clientId, levelKey, start, end, requestKey, validMetaDates]);
+  }, [clientId, levelKey, measureKey, start, end, requestKey, validMetaDates]);
+  const catalogLevel = widgetDraft?.level ?? "campaign";
+  const needsCatalog = metaConnected && widgetDraft?.kind === "data" && widgetDraft.sourceKind === "meta";
+  const catalogKey = `${clientId}:${start}:${end}:${catalogLevel}`;
+  useEffect(() => {
+    if (!needsCatalog || !validMetaDates || catalogState.key === catalogKey) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ client: clientId, start, end, level: catalogLevel, catalog: "1" });
+    fetch(`/api/dashboard?${params}`, { cache: "no-store", signal: controller.signal }).then(async response => {
+      if (!response.ok) throw new Error("Não foi possível consultar os eventos personalizados.");
+      const value: unknown = await response.json();
+      if (!validateMeta(value, clientId, catalogLevel, start, end) || !Array.isArray(value.metrics)) throw new Error("Catálogo Meta inválido para este cliente ou período.");
+      const metrics = value.metrics.flatMap(item => { const metric = item && typeof item.id === "string" ? getMetaMetric(item.id) : undefined; return metric ? [metric] : []; });
+      if (!controller.signal.aborted) setCatalogState({ key: catalogKey, metrics, error: value.status === "partial" ? "A descoberta de eventos foi parcial; alguns campos podem não aparecer." : "" });
+    }).catch(reason => { if (!controller.signal.aborted) setCatalogState({ key: catalogKey, metrics: [], error: reason instanceof Error ? reason.message : "Catálogo indisponível." }); });
+    return () => controller.abort();
+  }, [needsCatalog, validMetaDates, catalogState.key, catalogKey, catalogLevel, clientId, start, end]);
+  const catalogue = [...new Map([...BASE_META_METRICS, ...(catalogState.key === catalogKey ? catalogState.metrics : []), ...(doc?.widgets.flatMap(widget => widget.kind === "data" && widget.source.kind === "meta" ? widget.measures ?? [widget.measure] : []).flatMap(id => { const metric = getMetaMetric(id); return metric ? [metric] : []; }) ?? [])].map(metric => [metric.id, metric])).values()];
   async function save(next: BuilderDocument, onSuccess?: () => void) {
     if (!doc || busy || conflict) return;
     setBusy(true); setError("");
@@ -160,6 +201,7 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
   const saveWidget = (event: FormEvent) => {
     event.preventDefault(); if (!doc || !widgetDraft) return;
     const d = widgetDraft;
+    if (d.kind === "data" && invalidRadial(d.sourceKind, d.visualization, d.measure)) { setError(radialWarning); return; }
     if (!d.title.trim()) { setError("Informe o título da visualização."); return; }
     if (d.kind === "text" && !d.body.trim()) { setError("Informe o conteúdo do texto."); return; }
     if (d.kind === "data" && d.visualization !== "metric" && !d.dimension) { setError("Selecione uma dimensão (categoria) para este visual."); return; }
@@ -168,7 +210,7 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
     const oldRect = existing ? resolveCanvas(doc.widgets)[existing.id] : undefined;
     const existingPosition = existing?.position ?? (oldRect ? { x: oldRect.x, y: oldRect.y, height: oldRect.height } : undefined);
     const base = { id: d.id ?? crypto.randomUUID(), title: d.title.trim(), width: d.width, ...(existingPosition ? { position: existingPosition } : {}), ...(d.note.trim() ? { note: d.note.trim() } : {}) };
-    const widget: BuilderWidget = d.kind === "text" ? { ...base, kind: "text", body: d.body } : { ...base, kind: "data", source: d.sourceKind === "meta" ? { kind: "meta", level: d.level } : { kind: "manual", datasetId: d.datasetId }, visualization: d.visualization, ...(d.dimension && d.visualization !== "metric" ? { dimension: d.dimension } : {}), measure: d.measure, aggregation: d.aggregation, format: d.format };
+    const widget: BuilderWidget = d.kind === "text" ? { ...base, kind: "text", body: d.body } : { ...base, kind: "data", source: d.sourceKind === "meta" ? { kind: "meta", level: d.level } : { kind: "manual", datasetId: d.datasetId }, visualization: d.visualization, ...(d.dimension && d.visualization !== "metric" ? { dimension: d.dimension } : {}), measure: d.measure, ...(d.sourceKind === "meta" && d.visualization === "table" && d.aggregation === "sum" ? { measures: d.measures.length ? d.measures : [d.measure] } : {}), aggregation: d.aggregation, format: d.format };
     const widgets = d.id ? doc.widgets.map(item => item.id === d.id ? widget : item) : [...doc.widgets, widget];
     const arranged = d.id && existingPosition ? placeCanvasWidget(widgets, widget.id, { ...resolveCanvas(doc.widgets)[widget.id], width: d.width }) : widgets;
     void save({ ...doc, widgets: arranged }, () => { setWidgetDraft(null); setSelected(widget.id); });
@@ -257,15 +299,18 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
   const changeVisual = (visualization: BuilderVisualization) => {
     if (!doc || busy || conflict) return;
     if (widgetDraft?.kind === "data") {
+      if (invalidRadial(widgetDraft.sourceKind, visualization, widgetDraft.measure)) { setError(radialWarning); return; }
       setDraft({ visualization, dimension: visualization === "metric" ? "" : widgetDraft.dimension || dimensions[0] || "" });
       return;
     }
     if (active?.kind !== "data" || active.visualization === visualization) return;
     const source = active.source;
+    if (invalidRadial(source.kind, visualization, active.measure)) { setError(radialWarning); return; }
     const dimension = active.dimension || (source.kind === "meta" ? levelDimension[source.level] : doc.datasets.find(item => item.id === source.datasetId)?.fields.find(field => field.type === "text")?.id);
     if (visualization !== "metric" && !dimension) { setError("Este visual precisa de uma dimensão de texto. Edite os dados e escolha um conjunto com categorias."); return; }
     const rect = canvasRects[active.id];
     const widget: DataWidget = { ...active, visualization, position: active.position ?? { x: rect.x, y: rect.y, height: rect.height } };
+    if (visualization !== "table") delete widget.measures;
     if (visualization === "metric") delete widget.dimension;
     else widget.dimension = dimension;
     void save({ ...doc, widgets: doc.widgets.map(item => item.id === widget.id ? widget : item) });
@@ -293,11 +338,12 @@ function BuilderWorkspace({ clientId, admin, currency, metaConnected }: { client
           <fieldset><legend>Campos</legend>{datasetDraft.fields.map(field => <div className="builder-field" key={field.id}><label>{`Campo ${field.label}`}<input value={field.label} onChange={event => updateDataset({ fields: datasetDraft.fields.map(item => item.id === field.id ? { ...item, label: event.target.value } : item) })} /></label><span>{field.type === "number" ? "Número" : "Texto"}</span><button type="button" onClick={() => updateDataset({ fields: datasetDraft.fields.filter(item => item.id !== field.id), rows: datasetDraft.rows.map(row => { const copy = { ...row }; delete copy[field.id]; return copy; }) })}>Remover {field.label}</button></div>)}<label>Nome do campo<input value={fieldLabel} onChange={event => setFieldLabel(event.target.value)} /></label><label>Tipo do campo<select value={fieldType} onChange={event => setFieldType(event.target.value as Field["type"])}><option value="text">Texto</option><option value="number">Número</option></select></label><button type="button" onClick={addField}>Adicionar campo</button></fieldset>
           <fieldset><legend>Linhas</legend>{datasetDraft.rows.map((row, index) => <div className="builder-row-editor" key={index}>{datasetDraft.fields.map(field => <label key={field.id}>{`Linha ${index + 1}: ${field.label}`}<input type={field.type === "number" ? "number" : "text"} step={field.type === "number" ? "any" : undefined} value={row[field.id] ?? ""} onChange={event => updateDataset({ rows: datasetDraft.rows.map((item, i) => i === index ? { ...item, [field.id]: event.target.value === "" ? null : field.type === "number" ? Number(event.target.value) : event.target.value } : item) })} /></label>)}<button type="button" onClick={() => updateDataset({ rows: datasetDraft.rows.filter((_, i) => i !== index) })}>Remover linha {index + 1}</button></div>)}<button type="button" onClick={() => updateDataset({ rows: [...datasetDraft.rows, Object.fromEntries(datasetDraft.fields.map(field => [field.id, null]))] })}>Adicionar linha</button></fieldset><div className="builder-form-actions"><button className="builder-primary" type="submit" disabled={busy || conflict}>Salvar conjunto</button><button type="button" onClick={() => setDatasetDraft(null)}>Cancelar</button></div></form>
         : admin && widgetDraft ? <form className="builder-form" onSubmit={saveWidget} noValidate><h4>{widgetDraft.id ? "Editar visualização" : "Nova visualização"}</h4><label>Tipo<select value={widgetDraft.kind} onChange={event => setDraft({ kind: event.target.value as Draft["kind"] })}><option value="data">Dados</option><option value="text">Texto</option></select></label><label>Título da visualização<input value={widgetDraft.title} onChange={event => setDraft({ title: event.target.value })} required /></label><label>Largura<select value={widgetDraft.width} onChange={event => setDraft({ width: Number(event.target.value) as Draft["width"] })}>{Array.from({ length: 12 }, (_, i) => i + 1).map(value => <option key={value} value={value}>{value} colunas</option>)}</select></label><label>Observação<textarea value={widgetDraft.note} onChange={event => setDraft({ note: event.target.value })} /></label>
-          {widgetDraft.kind === "text" ? <label>Conteúdo<textarea value={widgetDraft.body} onChange={event => setDraft({ body: event.target.value })} /></label> : <><label>Fonte<select value={widgetDraft.sourceKind} onChange={event => { const kind = event.target.value as Draft["sourceKind"]; setDraft({ sourceKind: kind, measure: kind === "meta" ? "spend" : "", dimension: kind === "meta" ? levelDimension[widgetDraft.level] : "" }); }}><option value="manual">Conjunto manual</option>{metaConnected && <option value="meta">Meta Ads</option>}</select></label>
+          {widgetDraft.kind === "text" ? <label>Conteúdo<textarea value={widgetDraft.body} onChange={event => setDraft({ body: event.target.value })} /></label> : <><label>Fonte<select value={widgetDraft.sourceKind} onChange={event => { const kind = event.target.value as Draft["sourceKind"]; setDraft({ sourceKind: kind, measure: kind === "meta" ? "spend" : "", measures: kind === "meta" ? ["spend"] : [], format: kind === "meta" ? "currency" : "number", dimension: kind === "meta" ? levelDimension[widgetDraft.level] : "" }); }}><option value="manual">Conjunto manual</option>{metaConnected && <option value="meta">Meta Ads</option>}</select></label>
             {widgetDraft.sourceKind === "manual" ? <label>Conjunto<select value={widgetDraft.datasetId} onChange={event => setDraft({ datasetId: event.target.value, measure: "", dimension: "" })}><option value="">Selecione</option>{doc.datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}</select></label> : <label>Nível Meta<select value={widgetDraft.level} onChange={event => { const level = event.target.value as Level; setDraft({ level, dimension: levelDimension[level] }); }}><option value="campaign">Campanhas</option><option value="adset">Conjuntos de anúncios</option><option value="ad">Anúncios</option></select></label>}
             <label>Visualização<select value={widgetDraft.visualization} onChange={event => setDraft({ visualization: event.target.value as Draft["visualization"] })}>{VISUAL_PRESETS.map(preset => <option key={preset.kind} value={preset.kind}>{preset.label}</option>)}</select></label>
             {widgetDraft.visualization !== "metric" && <label>Dimensão<select value={widgetDraft.dimension} onChange={event => setDraft({ dimension: event.target.value })}><option value="">Selecione</option>{dimensions.map(value => <option key={value} value={value}>{widgetDraft.sourceKind === "meta" ? metaFieldLabels[value] ?? value : fields.find(field => field.id === value)?.label ?? value}</option>)}</select></label>}
-            <label>Medida<select value={widgetDraft.measure} onChange={event => setDraft({ measure: event.target.value })}><option value="">Selecione</option>{availableMeasures.map(value => <option key={value} value={value}>{widgetDraft.sourceKind === "meta" ? metaFieldLabels[value] ?? value : fields.find(field => field.id === value)?.label ?? value}</option>)}</select></label><label>Agregação<select value={widgetDraft.aggregation} onChange={event => { const aggregation = event.target.value as Draft["aggregation"]; setDraft({ aggregation, measure: aggregation !== "count" && widgetDraft.sourceKind === "manual" && fields.find(field => field.id === widgetDraft.measure)?.type === "text" ? "" : widgetDraft.measure }); }}><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem de linhas</option></select></label><label>Formato<select value={widgetDraft.format} onChange={event => setDraft({ format: event.target.value as Draft["format"] })}><option value="number">Número</option><option value="currency">Moeda</option></select></label></>}
+            {widgetDraft.sourceKind === "meta" && widgetDraft.aggregation !== "sum" && <p className="builder-hint">Agregação legada preservada: {widgetDraft.aggregation === "avg" ? "média" : "contagem de linhas"}. Trocar as métricas passa a usar os valores da API.</p>}
+            {widgetDraft.sourceKind === "meta" ? <MetaMetricPicker metrics={catalogue} selected={widgetDraft.visualization === "table" ? widgetDraft.measures.length ? widgetDraft.measures : widgetDraft.measure ? [widgetDraft.measure] : [] : widgetDraft.measure ? [widgetDraft.measure] : []} multiple={widgetDraft.visualization === "table"} loading={needsCatalog && validMetaDates && catalogState.key !== catalogKey} error={catalogState.key === catalogKey ? catalogState.error : undefined} disabled={busy || conflict} onChange={ids => setDraft({ measure: ids[0] ?? "", measures: ids, format: getMetaMetric(ids[0] ?? "")?.format ?? "number", aggregation: "sum" })} /> : <label>Medida<select value={widgetDraft.measure} onChange={event => setDraft({ measure: event.target.value })}><option value="">Selecione</option>{availableMeasures.map(value => <option key={value} value={value}>{fields.find(field => field.id === value)?.label ?? value}</option>)}</select></label>}{widgetDraft.sourceKind === "manual" && <label>Agregação<select value={widgetDraft.aggregation} onChange={event => { const aggregation = event.target.value as Draft["aggregation"]; setDraft({ aggregation, measure: aggregation !== "count" && widgetDraft.sourceKind === "manual" && fields.find(field => field.id === widgetDraft.measure)?.type === "text" ? "" : widgetDraft.measure }); }}><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem de linhas</option></select></label>}{widgetDraft.sourceKind === "meta" && widgetDraft.visualization === "table" ? <p className="builder-hint">Formato automático por coluna: moeda, número ou percentual conforme a métrica.</p> : <label>Formato<select value={widgetDraft.format} onChange={event => setDraft({ format: event.target.value as Draft["format"] })}><option value="number">Número</option><option value="currency">Moeda</option>{widgetDraft.sourceKind === "meta" && getMetaMetric(widgetDraft.measure)?.format === "percent" && <option value="percent">Percentual</option>}</select></label>}</>}
           <div className="builder-form-actions"><button className="builder-primary" type="submit" disabled={busy || conflict}>Salvar visualização</button><button type="button" onClick={() => setWidgetDraft(null)}>Cancelar</button></div></form>
         : <div className="builder-inspector-empty">{active ? <><h4>{active.title}</h4><p>{active.width} colunas · {active.kind === "text" ? "Texto" : active.visualization}</p>{admin && <div className="builder-size-controls"><p>Selecione um gráfico e ajuste no canvas. Arraste para mover; use o canto para redimensionar.</p><label>Largura no canvas<select value={canvasRects[active.id].width} disabled={busy || conflict} onChange={event => resizeSelection({ width: Number(event.target.value) })}>{Array.from({ length: 12 }, (_, i) => i + 1).map(value => <option value={value} key={value}>{value} colunas</option>)}</select></label><label>Altura no canvas<select value={canvasRects[active.id].height} disabled={busy || conflict} onChange={event => resizeSelection({ height: Number(event.target.value) })}>{Array.from({ length: 23 }, (_, i) => i + 2).map(value => <option value={value} key={value}>{value} linhas</option>)}</select></label><button type="button" onClick={() => setWidgetDraft(makeDraft(active))}>Editar dados e formato</button></div>}</> : <p>{admin ? "Clique em um gráfico para selecionar, mover e redimensionar." : "As visualizações são definidas pela equipe."}</p>}</div>}
       </aside>
