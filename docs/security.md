@@ -19,6 +19,8 @@ A prévia de revisão em `dash.yorus.top` usa Cloudflare Access com uma polític
 
 Verificação observada: aplicação/política lidas de volta pela API Cloudflare; túnel saudável, DNS CNAME proxyado; requisições anônimas para `/`, `/api/session` e `/api/dashboard` na URL pública redirecionam para Access; acesso direto ao IP de origem com Host `dash.yorus.top` não alcança a aplicação (404). Localmente, com headers de proxy e login próprio, `/api/session`, o construtor e `/api/dashboard` retornam 200; a rota Meta devolveu cinco campanhas no período testado, e widgets configurados persistiram sem armazenar valores da API. **O caminho público após o código enviado por e-mail do Access ainda depende de login real de um sócio; não foi automatizado nem declarado verificado.** A URL antiga de demonstração continua separada e sintética.
 
+Na rodada do canvas interativo, os quatro cartões inicialmente semeados nesta prévia foram removidos de modo condicionado ao estado esperado, com backup privado e leitura de volta; o painel do cliente-piloto agora inicia vazio. A credencial temporária anterior foi revogada e o segredo de sessão trocado. Verificação posterior: login anterior 401, novo 200, cookie `Secure`/`HttpOnly`, cliente limitado à eConfor, API Meta com cinco campanhas, canvas vazio e acesso anônimo público 302 para Access. Não registrar senha ou token neste documento.
+
 ## Camadas de acesso
 
 1. Autenticação de borda: Cloudflare Access no host `dash.yorus.top`, com política restrita e login por código no e-mail para os sócios Yorus; app e CNAME explícito verificados por leitura de volta.
