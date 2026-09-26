@@ -225,7 +225,7 @@ export default function Dashboard({
   const level = tab === "Metodologia" ? "campaign" : levels[tab];
 
   useEffect(() => {
-    if (!clientId || tab === "Metodologia" || blocksOnly || !start || !end || end < start)
+    if (!clientId || tab === "Metodologia" || blocksOnly || !client?.metaConnected || !start || !end || end < start)
       return;
     const controller = new AbortController();
     const params = new URLSearchParams({ client: clientId, start, end, level });
@@ -267,7 +267,7 @@ export default function Dashboard({
         }
       });
     return () => controller.abort();
-  }, [clientId, start, end, level, tab, blocksOnly, retry]);
+  }, [clientId, client?.metaConnected, start, end, level, tab, blocksOnly, retry]);
 
   function changeClient(id: string) {
     setData(null);
@@ -353,7 +353,7 @@ export default function Dashboard({
             META ADS <span>FONTE DE MÍDIA</span>
           </div>}
         </header>
-        {(!blocksOnly || tab === "Custos e decisão" || tab === "Perfil dos leads") && <div className="toolbar">
+        {(blocksOnly || client?.metaConnected) && <div className="toolbar">
           <div className="date-fields">
             <label>
               De{" "}
@@ -409,6 +409,7 @@ export default function Dashboard({
                 : "Os dados podem estar incompletos."}
             </div>
           )}
+        {tab === "Visão geral" && clientId && !client?.metaConnected && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={null} />}
         {tab === "Metodologia" ? (
           <section className="method">
             <h2>O que estes números mostram</h2>
@@ -457,6 +458,11 @@ export default function Dashboard({
           <p role="alert">
             A data final deve ser igual ou posterior à data inicial.
           </p>
+        ) : !client?.metaConnected ? (
+          <section className="notice source-unavailable">
+            <h2>Meta Ads não conectado</h2>
+            <p>Não há métricas de mídia para este cliente. Os blocos configuráveis continuam disponíveis sem ligação com campanhas.</p>
+          </section>
         ) : phase === "loading" ? (
           <section className="loading-panel" role="status" aria-busy="true">
             <p>Carregando dados de mídia...</p>
@@ -540,7 +546,7 @@ export default function Dashboard({
             </section>
           </>
         )}
-        {tab === "Visão geral" && clientId && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={phase === "ready" && data?.client.id === clientId && data.scope.level === "campaign" ? data : null} />}
+        {tab === "Visão geral" && clientId && client?.metaConnected && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={phase === "ready" && data?.client.id === clientId && data.scope.level === "campaign" ? data : null} />}
         {tab !== "Metodologia" && !blocksOnly && phase === "ready" && data && data.rows.length > 0 && end >= start && (
             <section className="detail-panel">
               <div className="section-heading">

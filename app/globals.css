@@ -469,6 +469,17 @@ tbody tr:hover {
   color: #ffd3b3;
   font-size: 13px;
 }
+.source-unavailable {
+  margin: 22px 0 0;
+}
+.source-unavailable h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.source-unavailable p {
+  margin: 0;
+  line-height: 1.5;
+}
 .footer-note {
   display: flex;
   justify-content: space-between;

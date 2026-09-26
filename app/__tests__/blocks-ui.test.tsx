@@ -6,8 +6,8 @@ import Dashboard, { type Session } from "../components/dashboard";
 const session: Session = {
   user: { email: "reader@example.test", role: "viewer" },
   clients: [
-    { id: "alpha", name: "Cliente Alpha", currency: "BRL", metaConnected: false, gaConnected: false },
-    { id: "beta", name: "Cliente Beta", currency: "BRL", metaConnected: false, gaConnected: false },
+    { id: "alpha", name: "Cliente Alpha", currency: "BRL", metaConnected: true, gaConnected: false },
+    { id: "beta", name: "Cliente Beta", currency: "BRL", metaConnected: true, gaConnected: false },
   ],
 };
 const question = {
@@ -26,6 +26,26 @@ function mockRequests(handler: (url: string, init?: RequestInit) => Promise<unkn
   return mock;
 }
 afterEach(() => vi.unstubAllGlobals());
+
+it("opens a manual-block preview without querying an unconfigured Meta source", async () => {
+  const admin = { ...session, user: { ...session.user, role: "admin" }, clients: session.clients.map(client => ({ ...client, metaConnected: false })) };
+  const demoNote = { id: "d5159d6f-4bb1-430b-a5cd-88a6c6f28850", kind: "note", tab: "overview", title: "Dados de demonstração", body: "Exemplo sintético.", evidenceType: "hypothesis", updatedAt: "2026-09-26T12:00:00.000Z" };
+  const requests = mockRequests(async url => url.startsWith("/api/clients/")
+    ? json({ version: 1, blocks: [demoNote] })
+    : json({}, 503));
+  render(<Dashboard session={admin} onLogout={() => {}} logoutError="" />);
+  expect(await screen.findByRole("article", { name: "Dados de demonstração" })).toBeInTheDocument();
+  expect(screen.getByText(/meta ads não conectado/i)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Meta Ads não conectado" }).closest("section")).toHaveClass("source-unavailable");
+  expect(screen.queryByText("Consulta indisponível")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Tentar novamente" })).not.toBeInTheDocument();
+  expect(requests.mock.calls.some(([url]) => url.startsWith("/api/dashboard?"))).toBe(false);
+  await userEvent.click(screen.getByRole("button", { name: "Perfil dos leads" }));
+  expect(await screen.findByRole("button", { name: "Adicionar bloco" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Campanhas" }));
+  expect(screen.getByText(/meta ads não conectado/i)).toBeInTheDocument();
+  expect(requests.mock.calls.some(([url]) => url.startsWith("/api/dashboard?"))).toBe(false);
+});
 
 it("shows configured questions independently of a failed Meta request without inventing responses", async () => {
   mockRequests(async (url) => url.startsWith("/api/clients/")
