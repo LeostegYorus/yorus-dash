@@ -70,6 +70,8 @@ function setup(impl: (url: string, init?: RequestInit) => Promise<unknown>) {
   calls = [];
   fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith("/api/clients/") && url.endsWith("/blocks")) return json({ version: 0, blocks: [] });
+    if (url.startsWith("/api/clients/") && url.endsWith("/builder")) return json({ version: 0, datasets: [], widgets: [] });
     calls.push(url);
     return impl(url, init);
   });
@@ -88,6 +90,10 @@ function authenticated(override?: (url: string) => Promise<unknown>) {
             ),
           ),
   );
+}
+async function openLegacyOverview() {
+  render(<Page />);
+  await userEvent.click(await screen.findByRole("button", { name: "Visão geral" }));
 }
 
 beforeEach(() => {
@@ -124,7 +130,7 @@ describe("dashboard UI", () => {
           })
         : json(result()),
     );
-    render(<Page />);
+    await openLegacyOverview();
     expect(await screen.findByText("Campanha, principal")).toBeInTheDocument();
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Cliente" }),
@@ -142,7 +148,7 @@ describe("dashboard UI", () => {
 
   it("rejects a payload whose tenant or level does not match the active request", async () => {
     authenticated(async () => json({ ...result(), client: clientB }));
-    render(<Page />);
+    await openLegacyOverview();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /resposta não corresponde/i,
     );
@@ -165,8 +171,8 @@ describe("dashboard UI", () => {
         rows: [{ ...rows[1], campaignName: "Somente Beta" }],
       });
     });
-    render(<Page />);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await openLegacyOverview();
+    await waitFor(() => expect(calls.filter((url) => url.startsWith("/api/dashboard"))).toHaveLength(1));
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Cliente" }),
       "beta",
@@ -198,8 +204,8 @@ describe("dashboard UI", () => {
         rows: [{ ...rows[1], campaignName: "Novo recorte" }],
       });
     });
-    render(<Page />);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await openLegacyOverview();
+    await waitFor(() => expect(calls.filter((url) => url.startsWith("/api/dashboard"))).toHaveLength(1));
     await userEvent.clear(screen.getByLabelText("Data inicial"));
     await userEvent.type(screen.getByLabelText("Data inicial"), "2026-09-01");
     expect(await screen.findByText("Novo recorte")).toBeInTheDocument();
@@ -219,7 +225,7 @@ describe("dashboard UI", () => {
         ),
       ),
     );
-    render(<Page />);
+    await openLegacyOverview();
     expect(
       await screen.findByRole("heading", { name: "Distribuição por campanha" }),
     ).toBeInTheDocument();
@@ -257,7 +263,7 @@ describe("dashboard UI", () => {
           })
         : json(result()),
     );
-    render(<Page />);
+    await openLegacyOverview();
     expect(await screen.findByText("Campanha, principal")).toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("Data inicial"));
     await userEvent.type(screen.getByLabelText("Data inicial"), "2026-09-01");
@@ -271,7 +277,7 @@ describe("dashboard UI", () => {
 
   it("defaults to the last 30 complete UTC days and marks a selected live day", async () => {
     authenticated();
-    render(<Page />);
+    await openLegacyOverview();
     await screen.findByRole("table");
     const yesterday = new Date(Date.now() - 86400000)
       .toISOString()
@@ -298,7 +304,7 @@ describe("dashboard UI", () => {
         rows: [],
       }),
     );
-    render(<Page />);
+    await openLegacyOverview();
     expect(
       await screen.findByText(/nenhum dado de mídia neste período/i),
     ).toBeInTheDocument();
@@ -316,7 +322,7 @@ describe("dashboard UI", () => {
         rows: [{ ...rows[0], impressions: 0 }],
       }),
     );
-    render(<Page />);
+    await openLegacyOverview();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Meta insights truncated after 5 pages",
     );
@@ -344,7 +350,7 @@ describe("dashboard UI", () => {
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
     try {
-      render(<Page />);
+      await openLegacyOverview();
       const table = await screen.findByRole("table");
       await userEvent.click(
         within(table).getByRole("button", { name: /investimento/i }),
@@ -391,7 +397,7 @@ describe("dashboard UI", () => {
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
     try {
-      render(<Page />);
+      await openLegacyOverview();
       await screen.findByRole("table");
       await userEvent.click(
         screen.getByRole("button", { name: "Exportar CSV" }),
@@ -413,7 +419,7 @@ describe("dashboard UI", () => {
           ? json({}, 503)
           : json(result()),
     );
-    render(<Page />);
+    await openLegacyOverview();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Fonte de dados indisponível",
     );
@@ -433,7 +439,7 @@ describe("dashboard UI", () => {
           ? json({}, 503)
           : json(result()),
     );
-    render(<Page />);
+    await openLegacyOverview();
     await screen.findByText("Campanha, principal");
     await userEvent.click(screen.getByRole("button", { name: "Sair" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -450,7 +456,7 @@ describe("dashboard UI", () => {
           ? json({ ok: true })
           : json(result()),
     );
-    render(<Page />);
+    await openLegacyOverview();
     await screen.findByText("Campanha, principal");
     await userEvent.click(screen.getByRole("button", { name: "Sair" }));
     expect(
@@ -510,7 +516,7 @@ describe("dashboard UI", () => {
     await userEvent.type(screen.getByLabelText("Senha"), "senha");
     await userEvent.click(screen.getByRole("button", { name: "Entrar" }));
     expect(
-      await screen.findByRole("heading", { name: "Visão geral" }),
+      await screen.findByRole("heading", { name: "Meu painel" }),
     ).toBeInTheDocument();
     expect(calls).toContain("/api/login");
   });

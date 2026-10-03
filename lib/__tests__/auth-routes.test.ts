@@ -105,7 +105,8 @@ describe('server auth routes', () => {
     const [name, value] = cookie.split('=');
     const [payload, mac] = value.split('.');
     const altered = `${name}=${Buffer.from(JSON.stringify({ email: 'a@example.test', clients: ['beta'], exp: 9999999999 })).toString('base64url')}.${mac}`;
-    for (const headers of [new Headers(), new Headers({ cookie: altered }), new Headers({ cookie: `${name}=${payload}.${mac.slice(0, -1)}X` })]) {
+    const corruptedMac = `${mac[0] === 'A' ? 'B' : 'A'}${mac.slice(1)}`;
+    for (const headers of [new Headers(), new Headers({ cookie: altered }), new Headers({ cookie: `${name}=${payload}.${corruptedMac}` })]) {
       const sessionResponse = await session(new Request('http://localhost/api/session', { headers }));
       const dashboardResponse = await dashboard(new Request(url, { headers }));
       expect(sessionResponse.status).toBe(401);
@@ -190,6 +191,25 @@ describe('server auth routes', () => {
     const sameOriginRequest = postLogin({ email: 'a@example.test', password: 'test-only-password' });
     sameOriginRequest.headers.set('origin', 'http://localhost');
     expect((await POST(sameOriginRequest)).status).toBe(200);
+  });
+
+  it('accepts browser HTTPS Origin behind a TLS-terminating proxy but not forged hosts or ambiguous forwarding', async () => {
+    const { POST } = await import('../../app/api/login/route');
+    const body = { email: 'a@example.test', password: 'test-only-password' };
+    const proxied = postLogin(body);
+    proxied.headers.set('origin', 'https://localhost');
+    proxied.headers.set('x-forwarded-proto', 'https');
+    expect((await POST(proxied)).status).toBe(200);
+    for (const [origin, proto] of [
+      ['https://attacker.example', 'https'],
+      ['https://localhost', 'https,http'],
+      ['https://localhost', 'http'],
+    ]) {
+      const request = postLogin(body);
+      request.headers.set('origin', origin);
+      request.headers.set('x-forwarded-proto', proto);
+      expect((await POST(request)).status).toBe(403);
+    }
   });
 
   it('marks cookies Secure in production', async () => {

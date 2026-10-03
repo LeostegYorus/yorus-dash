@@ -1,6 +1,7 @@
 import { authenticate, errorResponse, jsonResponse } from '../../../lib/auth';
 import { ConfigurationError } from '../../../lib/clients';
 import { MetaInsightsError, readMetaInsights, type MetaLevel } from '../../../lib/integrations/meta';
+import { readMetaBuilderInsights } from '../../../lib/integrations/meta-builder';
 
 export const runtime = 'nodejs';
 
@@ -9,8 +10,10 @@ export async function GET(request: Request): Promise<Response> {
     const session = authenticate(request);
     if (!session) return errorResponse(401);
     const query = new URL(request.url).searchParams;
-    if ([...query.keys()].some(key => !['client', 'start', 'end', 'level'].includes(key)) ||
-      ['client', 'start', 'end', 'level'].some(key => query.getAll(key).length !== 1)) return errorResponse(400);
+    if ([...query.keys()].some(key => !['client', 'start', 'end', 'level', 'metrics', 'catalog'].includes(key)) ||
+      ['client', 'start', 'end', 'level'].some(key => query.getAll(key).length !== 1) ||
+      ['metrics', 'catalog'].some(key => query.getAll(key).length > 1) ||
+      (query.has('catalog') && query.get('catalog') !== '1')) return errorResponse(400);
     const id = query.get('client')!;
     const start = query.get('start')!;
     const end = query.get('end')!;
@@ -19,10 +22,13 @@ export async function GET(request: Request): Promise<Response> {
       !/^\d{4}-\d{2}-\d{2}$/.test(end) || !['campaign', 'adset', 'ad'].includes(level)) return errorResponse(400);
     const client = session.clients.find(item => item.id === id);
     if (!client) return errorResponse(403);
-    const insights = await readMetaInsights({
+    const input = {
       account: client.metaAccountId, allowedAccountIds: session.clients.map(item => item.metaAccountId),
       start, end, level: level as MetaLevel, token: process.env.META_SYSTEM_USER_TOKEN ?? '',
-    });
+    };
+    const insights = query.has('metrics') || query.has('catalog')
+      ? await readMetaBuilderInsights({ ...input, metrics: query.has('metrics') ? query.get('metrics')!.split(',') : undefined, discover: query.get('catalog') === '1' })
+      : await readMetaInsights(input);
     return jsonResponse({ client: { id: client.id, name: client.name, currency: client.currency }, ...insights });
   } catch (error) {
     if (error instanceof ConfigurationError) return errorResponse(503);

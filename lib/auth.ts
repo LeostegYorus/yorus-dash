@@ -72,6 +72,15 @@ export function authenticate(request: Request): Authenticated | null {
   return { user, clients: allowed };
 }
 
+export function sameOrigin(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  const target = new URL(request.url);
+  if (origin === target.origin) return true;
+  // Only trust X-Forwarded-Proto when the Node listener is private behind a trusted proxy.
+  return target.protocol === 'http:' && request.headers.get('x-forwarded-proto') === 'https' && origin === `https://${target.host}`;
+}
+
 export function jsonResponse(payload: unknown, status = 200, headers: HeadersInit = {}): Response {
   return Response.json(payload, { status, headers: { 'Cache-Control': 'no-store', ...headers } });
 }
