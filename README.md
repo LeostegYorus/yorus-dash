@@ -2,6 +2,10 @@
 
 Sistema independente de dashboards para clientes da Yorus. **Não é o site institucional Data Hub.** A interface se inspira no BI Basilar entregue como referência visual, sem reutilizar seus dados comerciais.
 
+## Handover técnico e operacional
+
+Consulte [docs/HANDOVER.md](docs/HANDOVER.md) para arquitetura, funcionalidades, limitações, configuração, inventário da prévia, runbook de publicação e próximos passos. O documento separa as verificações executadas das evidências históricas e das pendências.
+
 ## Primeiro recorte
 
 - **Meu painel (construtor):** o administrador cria conjuntos manuais com campos tipados e linhas, escolhe medidas e dimensões, escolhe formatos pré-configurados na galeria **Criar visual** (métrica, barras horizontais, colunas, linhas, área, pizza, rosca e tabela), além de texto, e configura agregação e formato. Os presets usam campos reais da fonte disponível e abrem o editor de campos; sem fonte compatível, abrem um rascunho sem métricas inventadas. O inspetor troca o tipo mantendo dados, posição e dimensões. Linhas/áreas seguem a ordem das categorias, não constituem série diária; pizza/rosca só calculam participações sobre os valores agregados exibidos se todos forem informados, não negativos e com soma positiva. Tooltips, legendas e **Ver dados** preservam rótulos completos (os eixos podem abreviá-los). O canvas usa uma grade de 12 colunas: clique em um gráfico para selecioná-lo, arraste pelo controle **Arrastar** para mudar de lugar e puxe a alça no canto para redimensionar largura e altura. O inspetor permite definir medidas exatas em colunas/linhas; a disposição fica salva por cliente. Leitores veem sem editar. Veja `docs/briefs/dashboard-builder.md` para limites e critérios.
