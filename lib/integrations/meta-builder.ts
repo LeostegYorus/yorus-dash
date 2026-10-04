@@ -1,5 +1,6 @@
 // Server-only: use through the authenticated dashboard route.
 import { MetaInsightsError, type MetaInsightsInput } from './meta';
+import { supportsMetaFilter, validEntityFilter, type MetaEntityFilter } from '../builder-analysis';
 import { BASE_META_METRICS, META_DISCOVERY_FIELDS, discoverMetaMetrics, getMetaMetric, type MetaMetric } from '../meta-metrics';
 
 const CORE = ['spend', 'impressions', 'clicks'];
@@ -53,6 +54,7 @@ async function fetchPage(input: MetaBuilderInput, url: URL, timeoutMs: number): 
         for (const row of payload.data) {
           if (!isRecord(row) || (row.account_id !== undefined && row.account_id !== input.account.slice(4)) || typeof row[`${input.level}_id`] !== 'string' || !/^\d+$/.test(row[`${input.level}_id`] as string) || row.date_start !== input.start || row.date_stop !== input.end || IDENTITIES.some(([field]) => row[field] !== undefined && typeof row[field] !== 'string')) throw new MetaInsightsError('Invalid Meta insight identity or period', 502);
         }
+        if (input.entityFilter && payload.data.some(row => (row as RawRow)[`${input.entityFilter!.level}_id`] !== input.entityFilter!.id)) throw new MetaInsightsError('Meta rows outside requested filter', 502);
         return payload as Page;
       })(),
       new Promise<never>((_, reject) => {
@@ -61,7 +63,7 @@ async function fetchPage(input: MetaBuilderInput, url: URL, timeoutMs: number): 
     ]);
   } finally { clearTimeout(timer); }
 }
-export type MetaBuilderInput = MetaInsightsInput & { metrics?: string[]; discover?: boolean };
+export type MetaBuilderInput = MetaInsightsInput & { metrics?: string[]; discover?: boolean; entityFilter?: MetaEntityFilter };
 export async function readMetaBuilderInsights(input: MetaBuilderInput) {
   if (!/^act_[0-9]+$/.test(input.account)) throw new MetaInsightsError('Invalid Meta account ID', 400);
   if (!Array.isArray(input.allowedAccountIds) || !input.allowedAccountIds.includes(input.account)) throw new MetaInsightsError('Meta account not authorized', 403);
@@ -73,6 +75,7 @@ export async function readMetaBuilderInsights(input: MetaBuilderInput) {
   const start = parseDate(input.start), end = parseDate(input.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || end - start > 92 * 86_400_000) throw new MetaInsightsError('Invalid Meta date range', 400);
   if (!['campaign', 'adset', 'ad'].includes(input.level)) throw new MetaInsightsError('Invalid Meta insights level', 400);
+  if (input.entityFilter !== undefined && (!validEntityFilter(input.entityFilter) || !supportsMetaFilter(input.level, input.entityFilter))) throw new MetaInsightsError('Invalid Meta entity filter', 400);
   if (input.discover !== undefined && typeof input.discover !== 'boolean') throw new MetaInsightsError('Invalid Meta discovery option', 400);
   if (input.metrics !== undefined && (!Array.isArray(input.metrics) || input.metrics.length < 1 || input.metrics.length > 200 || new Set(input.metrics).size !== input.metrics.length || input.metrics.some(id => typeof id !== 'string' || !getMetaMetric(id)))) throw new MetaInsightsError('Invalid Meta metrics', 400);
   if (typeof input.token !== 'string' || !input.token.trim()) throw new MetaInsightsError('Meta token is not configured', 503);
@@ -80,6 +83,7 @@ export async function readMetaBuilderInsights(input: MetaBuilderInput) {
   const fields = [...new Set([...selected.map(metric => metric.field), ...(input.discover ? META_DISCOVERY_FIELDS : [])])];
   const baseUrl = new URL(`https://graph.facebook.com/v26.0/${input.account}/insights`);
   baseUrl.searchParams.set('level', input.level);
+  if (input.entityFilter) baseUrl.searchParams.set('filtering', JSON.stringify([{ field: `${input.entityFilter.level}.id`, operator: 'IN', value: [input.entityFilter.id] }]));
   baseUrl.searchParams.set('time_range', JSON.stringify({ since: input.start, until: input.end }));
   baseUrl.searchParams.set('default_summary', 'true');
   baseUrl.searchParams.set('limit', '500');
@@ -152,7 +156,7 @@ export async function readMetaBuilderInsights(input: MetaBuilderInput) {
   if (selected.some(metric => totals[metric.id] === null)) warnings.push('Meta summary unavailable for one or more metrics; totals left null');
   if (rows.some(row => selected.some(metric => row[metric.id] === null))) warnings.push('Meta rows have missing metric values; left null');
   return {
-    provider: 'meta' as const, scope: { account: input.account, level: input.level },
+    provider: 'meta' as const, scope: { account: input.account, level: input.level, ...(input.entityFilter ? { entityFilter: input.entityFilter } : {}) },
     dateRange: { start: input.start, end: input.end }, collectedAt: new Date().toISOString(),
     rows, totals, metrics: input.discover ? discoverMetaMetrics([...rawRows, summary]) : [...new Map([...BASE_META_METRICS, ...selected].map(metric => [metric.id, metric])).values()], unavailableMetrics, warnings, status: warnings.length ? 'partial' as const : 'succeeded' as const,
   };

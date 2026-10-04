@@ -865,3 +865,13 @@ tbody tr:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The configurable report can use the full workspace without leaving the editor. */
+.main-content.builder-main { padding: 20px 22px; }
+.builder-main > .topline { padding-bottom: 18px; }
+.builder-main > .topline h1 { font-size: 27px; }
+.workspace:has(.builder[data-focus="true"]) { grid-template-columns: minmax(0, 1fr); }
+.workspace:has(.builder[data-focus="true"]) > .sidebar { display: none; }
+.builder-main:has(.builder[data-focus="true"]) { padding: 0; }
+.builder-main:has(.builder[data-focus="true"]) > .topline, .builder-main:has(.builder[data-focus="true"]) > footer { display: none; }
+@media (max-width: 800px) { .main-content.builder-main { padding: 16px 10px; } .builder-main:has(.builder[data-focus="true"]) { padding: 0; } }

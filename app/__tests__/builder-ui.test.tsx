@@ -394,7 +394,7 @@ it.each([['column', 'colunas'], ['line', 'linhas'], ['area', 'área'], ['pie', '
   store({ version: 1, datasets: [dataset], widgets: [{ ...manualWidget, visualization, dimension: 'canal' }] });
   render(<DashboardBuilder {...props} admin={false} />);
   const card = await screen.findByRole('article', { name: 'Conversão' });
-  expect(within(card).getByRole('img', { name: `Gráfico de ${label}` })).toBeInTheDocument();
+  expect(within(card).getByRole('group', { name: `Gráfico de ${label}` })).toBeInTheDocument();
   expect(card.querySelector('.builder-bars')).toBeNull();
   expect(within(card).getByText(/Planilha comercial/)).toBeInTheDocument();
   expect(screen.queryByRole('group', { name: 'Criar visual' })).toBeNull();

@@ -6,8 +6,12 @@ export type ManualDataset = {
   rows: Array<Record<string, string | number | null>>;
 };
 export const BUILDER_MAX_ROW = 1199;
-export type BuilderVisualization = 'metric' | 'bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'table';
-type WidgetBase = { id: string; title: string; width: number; note?: string; position?: { x: number; y: number; height: number } };
+export type BuilderVisualization = 'metric' | 'bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'table' | 'treemap' | 'lollipop';
+export type WidgetAppearance = {
+  color?: string; background?: string; textColor?: string; fontSize?: number; decimals?: number;
+  showTitle?: boolean; showLegend?: boolean; showLabels?: boolean;
+};
+type WidgetBase = { id: string; title: string; width: number; note?: string; position?: { x: number; y: number; height: number }; appearance?: WidgetAppearance };
 export type BuilderWidget = WidgetBase & (
   { kind: 'text'; body: string } |
   { kind: 'data'; source: { kind: 'manual'; datasetId: string } | { kind: 'meta'; level: 'campaign' | 'adset' | 'ad' }; visualization: BuilderVisualization; dimension?: string; measure: string; measures?: string[]; aggregation: 'sum' | 'avg' | 'count'; format: 'number' | 'currency' | 'percent' }
@@ -62,6 +66,20 @@ function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWi
   if (!uuid(value.id) || !Number.isInteger(value.width) || (value.width as number) < 1 || (value.width as number) > 12) invalid();
   text(value.title, 120);
   if (value.note !== undefined) text(value.note, 2000, false, true);
+  if (Object.hasOwn(value, 'appearance')) {
+    const appearance = value.appearance;
+    if (!object(appearance)) throw new BuilderValidationError();
+    keys(appearance, [], ['color', 'background', 'textColor', 'fontSize', 'decimals', 'showTitle', 'showLegend', 'showLabels']);
+    for (const key of ['color', 'background', 'textColor']) {
+      if (Object.hasOwn(appearance, key) && (typeof appearance[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(appearance[key] as string))) invalid();
+    }
+    for (const [key, min, max] of [['fontSize', 12, 32], ['decimals', 0, 4]] as const) {
+      if (Object.hasOwn(appearance, key) && (!Number.isInteger(appearance[key]) || (appearance[key] as number) < min || (appearance[key] as number) > max)) invalid();
+    }
+    for (const key of ['showTitle', 'showLegend', 'showLabels']) {
+      if (Object.hasOwn(appearance, key) && typeof appearance[key] !== 'boolean') invalid();
+    }
+  }
   if (Object.hasOwn(value, 'position')) {
     const position = value.position;
     if (!object(position)) throw new BuilderValidationError();
@@ -72,11 +90,11 @@ function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWi
         (position.x as number) + (value.width as number) > 12) invalid();
   }
   if (value.kind === 'text') {
-    keys(value, ['id', 'kind', 'title', 'width', 'body'], ['note', 'position']);
+    keys(value, ['id', 'kind', 'title', 'width', 'body'], ['note', 'position', 'appearance']);
     text(value.body, 4000, true, true);
   } else if (value.kind === 'data') {
-    keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note', 'position', 'measures']);
-    if (!object(value.source) || !['metric', 'bar', 'column', 'line', 'area', 'pie', 'donut', 'table'].includes(value.visualization as string) || !['sum', 'avg', 'count'].includes(value.aggregation as string) || !['number', 'currency', 'percent'].includes(value.format as string)) invalid();
+    keys(value, ['id', 'kind', 'title', 'width', 'source', 'visualization', 'measure', 'aggregation', 'format'], ['dimension', 'note', 'position', 'measures', 'appearance']);
+    if (!object(value.source) || !['metric', 'bar', 'column', 'line', 'area', 'pie', 'donut', 'table', 'treemap', 'lollipop'].includes(value.visualization as string) || !['sum', 'avg', 'count'].includes(value.aggregation as string) || !['number', 'currency', 'percent'].includes(value.format as string)) invalid();
 
     if (value.dimension !== undefined && (typeof value.dimension !== 'string' || !value.dimension)) invalid();
     if (value.visualization !== 'metric' && value.dimension === undefined) invalid();
@@ -96,7 +114,7 @@ function widget(value: unknown, datasets: Map<string, ManualDataset>): BuilderWi
       const metric = typeof value.measure === 'string' ? getMetaMetric(value.measure) : undefined;
       if (typeof source.level !== 'string' || !Object.hasOwn(dimensions, source.level) || !metric || (value.dimension !== undefined && value.dimension !== dimensions[source.level])) invalid();
       if (value.format === 'percent' && metric?.format !== 'percent') invalid();
-      if (['pie', 'donut'].includes(value.visualization as string) && !metric?.additive) invalid();
+      if (['pie', 'donut', 'treemap'].includes(value.visualization as string) && !metric?.additive) invalid();
       if (value.aggregation !== 'sum' && (!['spend', 'impressions', 'clicks'].includes(value.measure as string) || Object.hasOwn(value, 'measures'))) invalid();
       if (Object.hasOwn(value, 'measures')) {
         const measures = value.measures;

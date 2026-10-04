@@ -20,6 +20,15 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('dashboard builder metrics route', () => {
+  it('accepts an entity filter without exposing a caller-selected account', async () => {
+    const result = await GET(request(`${query}&entityLevel=campaign&entityId=1`));
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ scope: { account: 'act_1', entityFilter: { level: 'campaign', id: '1' } }, totals: { spend: 10 } });
+  });
+  it.each(['entityLevel=campaign', 'entityId=1', 'entityLevel=campaign&entityId=1&entityId=2', 'entityLevel=account&entityId=1', 'entityLevel=campaign&entityId=abc'])('rejects malformed entity query %s before fetching', async suffix => {
+    expect((await GET(request(`${query}&${suffix}`))).status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('opts into real builder metrics and catalog using the session-bound account', async () => {
     const result = await GET(request(`${query}&metrics=reach,ctr&catalog=1`));
     expect(result.status).toBe(200);

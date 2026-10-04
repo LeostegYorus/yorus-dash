@@ -10,6 +10,23 @@ const read = async (options: Record<string, unknown> = {}) => (await import('../
 afterEach(() => vi.useRealTimers());
 
 describe('Meta builder connector', () => {
+  it('filters on the authorized account, keeps the filtered summary, and identifies the filter', async () => {
+    const fetchImpl = vi.fn(async () => response([row({ reach: '80' })], { spend: '10', impressions: '100', clicks: '5', reach: '70' }));
+    const result = await read({ entityFilter: { level: 'campaign', id: '1' }, metrics: ['reach'], fetchImpl });
+    expect(result.totals.reach).toBe(70);
+    expect(result.scope).toMatchObject({ account: 'act_1', entityFilter: { level: 'campaign', id: '1' } });
+    const url = new URL(String((fetchImpl.mock.calls[0] as unknown as [string])[0]));
+    expect(url.pathname).toBe('/v26.0/act_1/insights');
+    expect(JSON.parse(url.searchParams.get('filtering')!)).toEqual([{ field: 'campaign.id', operator: 'IN', value: ['1'] }]);
+  });
+  it.each([{ level: 'account', id: '1' }, { level: 'campaign', id: 'bad' }, { level: 'ad', id: '1' }, { level: 'campaign', id: '1', account: 'act_2' }])('rejects invalid entity filters %j', async entityFilter => {
+    const fetchImpl = vi.fn(async () => response([row()]));
+    await expect(read({ entityFilter, fetchImpl })).rejects.toMatchObject({ status: 400 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('rejects upstream rows outside the requested entity filter', async () => {
+    await expect(read({ entityFilter: { level: 'campaign', id: '2' }, fetchImpl: async () => response([row()]) })).rejects.toMatchObject({ status: 502 });
+  });
   it.each([
     [{ account: 'https://evil.test' }, 400], [{ account: 'act_2' }, 403],
     [{ start: '2026-02-30' }, 400], [{ start: '2025-01-01' }, 400],
