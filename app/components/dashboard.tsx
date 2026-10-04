@@ -413,7 +413,7 @@ export default function Dashboard({
           )}
         {tab === "Visão geral" && clientId && !client?.metaConnected && <BlockWorkspace key={clientId} clientId={clientId} tab="overview" admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} meta={null} />}
         {tab === "Meu painel" && clientId ? (
-          <DashboardBuilder key={clientId} clientId={clientId} admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} metaConnected={Boolean(client?.metaConnected)} />
+          <DashboardBuilder key={clientId} clientId={clientId} clientName={client?.name} admin={session.user.role === "admin"} currency={client?.currency ?? "BRL"} metaConnected={Boolean(client?.metaConnected)} />
         ) : tab === "Metodologia" ? (
           <section className="method">
             <h2>O que estes números mostram</h2>

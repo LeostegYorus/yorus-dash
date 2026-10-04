@@ -1,13 +1,72 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import BuilderChart from '../builder-chart';
 
 const formatValue = (value: number) => `R$ ${value}`;
 const sample = [{ label: 'Receita', value: 30 }, { label: 'Ausente', value: null }, { label: 'Zero', value: 0 }];
 
 describe('BuilderChart', () => {
+  it('renders treemap areas in proportion to positive values without inventing areas for zero', () => {
+    const { container, rerender } = render(<BuilderChart type="treemap" data={[{ label: 'A', value: 30 }, { label: 'H', value: 10 }, { label: 'Zero', value: 0 }]} formatValue={formatValue} />);
+    expect(screen.getByRole('img', { name: 'Treemap' })).toBeInTheDocument();
+    const tiles = [...container.querySelectorAll('.builder-treemap-tile')];
+    expect(tiles).toHaveLength(2);
+    const areas = tiles.map(tile => Number(tile.getAttribute('width')) * Number(tile.getAttribute('height')));
+    expect(areas[0] / areas[1]).toBeCloseTo(3);
+    expect(tiles[0].getAttribute('fill')).not.toBe(tiles[1].getAttribute('fill'));
+    expect(screen.getByRole('list', { name: 'Legenda' })).toHaveTextContent('Zero: R$ 0');
+    rerender(<BuilderChart type="treemap" data={[{ label: 'A', value: 1e308 }, { label: 'H', value: 1e308 }]} formatValue={formatValue} />);
+    expect(container.querySelector('svg')!.outerHTML).not.toMatch(/NaN|Infinity/);
+  });
+
+  it.each([
+    [[{ label: 'A', value: null }, { label: 'B', value: 10 }], /ausentes/],
+    [[{ label: 'A', value: -1 }, { label: 'B', value: 10 }], /negativos/],
+    [[{ label: 'A', value: 0 }], /soma é zero/],
+  ] as const)('keeps unsupported treemap proportions explicit', (data, warning) => {
+    render(<BuilderChart type="treemap" data={[...data]} formatValue={formatValue} />);
+    expect(screen.getByRole('status')).toHaveTextContent(warning);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('renders a point chart with stems from zero, signed values and gaps for missing data', () => {
+    const { container } = render(<BuilderChart type="lollipop" data={[{ label: 'Perda', value: -4 }, { label: 'Ganho', value: 6 }, { label: 'Ausente', value: null }]} formatValue={formatValue} />);
+    expect(screen.getByRole('img', { name: 'Gráfico de pontos' })).toBeInTheDocument();
+    const stems = [...container.querySelectorAll('.builder-chart-stem')];
+    expect(stems).toHaveLength(2);
+    const baseline = Number(container.querySelector('.builder-chart-baseline')!.getAttribute('y1'));
+    expect(Number(stems[0].getAttribute('y1'))).toBe(baseline);
+    expect(Number(stems[0].getAttribute('y2'))).toBeGreaterThan(baseline);
+    expect(Number(stems[1].getAttribute('y2'))).toBeLessThan(baseline);
+    expect(container.querySelectorAll('.builder-chart-point')).toHaveLength(2);
+  });
+
+  it('resizes the plot with its viewport and reserves room for large labels', () => {
+    let resize!: (entries: Array<{ contentRect: { width: number; height: number } }>) => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: typeof resize) { resize = callback; } observe() {} disconnect = disconnect; });
+    try {
+      const { container, unmount, rerender } = render(<BuilderChart type="column" data={[{ label: 'Campanha', value: 6840 }, { label: 'Outra', value: -200 }]} formatValue={formatValue} appearance={{ fontSize: 32, showLabels: true }} />);
+      act(() => resize([{ contentRect: { width: 800, height: 400 } }]));
+      const svg = container.querySelector('svg')!;
+      expect(svg).toHaveAttribute('viewBox', '0 0 800 400');
+      const labels = [...container.querySelectorAll('.builder-chart-value')];
+      expect(Number(labels[0].getAttribute('y'))).toBeGreaterThanOrEqual(32);
+      expect(Number(labels[1].getAttribute('y'))).toBeLessThanOrEqual(400 - 64);
+      const gutter = Number(container.querySelector('.builder-chart-baseline')!.getAttribute('x1'));
+      expect(gutter).toBeGreaterThanOrEqual(formatValue(6840).length * 20);
+      act(() => resize([{ contentRect: { width: 920, height: 510 } }]));
+      expect(svg).toHaveAttribute('viewBox', '0 0 920 510');
+      expect(svg.outerHTML).not.toMatch(/NaN|Infinity/);
+      rerender(<BuilderChart type="column" data={Array.from({ length: 8 }, (_, i) => ({ label: `Campanha ${i}`, value: i + 1 }))} formatValue={formatValue} appearance={{ fontSize: 32, showLabels: false }} />);
+      act(() => resize([{ contentRect: { width: 320, height: 200 } }]));
+      const categories = container.querySelectorAll('svg > g > text');
+      expect(Number(categories[1].getAttribute('x')) - Number(categories[0].getAttribute('x'))).toBeGreaterThanOrEqual(32 * 3 * 0.72);
+      unmount(); expect(disconnect).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
   it.each(['column', 'line', 'area'] as const)('%s labels its zero axis once and distinguishes zero-only from missing-only data', (type) => {
     const { container, rerender } = render(<BuilderChart type={type} data={[{ label: 'Perda', value: -4 }, { label: 'Ganho', value: 6 }]} formatValue={formatValue} />);
     expect([...container.querySelectorAll('.builder-chart-tick')].filter(tick => tick.textContent === 'R$ 0')).toHaveLength(1);
@@ -43,7 +102,8 @@ describe('BuilderChart', () => {
       expect(getComputedStyle(viewport!).overflowX).toBe('auto');
       const svg = container.querySelector('svg')!;
       expect(parseFloat(svg.style.minWidth)).toBeLessThanOrEqual(60 * 80 + 240);
-      expect(parseFloat(getComputedStyle(svg).minHeight)).toBeGreaterThanOrEqual(280);
+      expect(parseFloat(getComputedStyle(svg).minHeight)).toBeGreaterThanOrEqual(160);
+      expect(getComputedStyle(svg).height).toBe('100%');
       expect(container.querySelectorAll('.builder-chart-column')).toHaveLength(60);
       expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(60);
       expect(svg.textContent).toContain(data[59].label);

@@ -37,6 +37,10 @@ export function resolveCanvas(widgets: BuilderWidget[]): Record<string, CanvasRe
   return Object.fromEntries(positioned);
 }
 
+export function findCanvasSpace(widgets: BuilderWidget[], width: number, height: number): CanvasRect {
+  return firstAvailable(width, height, Object.values(resolveCanvas(widgets)));
+}
+
 export function placeCanvasWidget(widgets: BuilderWidget[], id: string, desired: CanvasRect): BuilderWidget[] {
   const previous = resolveCanvas(widgets);
   const chosen = widgets.find(widget => widget.id === id);
